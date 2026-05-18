@@ -1,0 +1,12 @@
+{
+  "frontend_created": true,
+  "api_client_created": true,
+  "ask_flow_implemented": true,
+  "intake_flow_implemented": true,
+  "health_check_implemented": true,
+  "debug_drawer_implemented": true,
+  "build_passed": true,
+  "safe_for_backend_frontend_integration": true,
+  "build_command": "npm run build",
+  "build_result": "success"
+}

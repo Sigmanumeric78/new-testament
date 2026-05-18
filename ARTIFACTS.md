@@ -44,3 +44,37 @@ PYTHONPATH=backend python3 backend/reasoning/scientific_validity_audit.py
 ```
 
 Supabase upload/download integration is planned, not implemented in this phase.
+
+## Phase 09E Script Commands
+Create release bundle metadata:
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/create_release_bundle.py --release v0.1-local-intelligence
+```
+
+Upload (dry-run by default):
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/artifact_upload_supabase.py --release v0.1-local-intelligence --dry-run
+```
+
+Upload (execute):
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/artifact_upload_supabase.py --release v0.1-local-intelligence --execute
+```
+
+Download (dry-run by default):
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/artifact_download_supabase.py --release v0.1-local-intelligence --dry-run
+```
+
+Verify local release files:
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py --release v0.1-local-intelligence
+```
+
+Security note:
+- Never print or commit `SUPABASE_SERVICE_ROLE_KEY`.

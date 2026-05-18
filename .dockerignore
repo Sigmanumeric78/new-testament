@@ -6,6 +6,8 @@ __pycache__
 
 # Data and large artifacts
 data/raw
+data/processed
+data/interim
 data/processed/weaviate/embedded
 data/vector_db
 data/knowledge_graph

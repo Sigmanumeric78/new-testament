@@ -73,10 +73,46 @@ def test_long_sentence_extraction() -> None:
     assert signals["amount_ml"] == 200.0
     assert signals["duration_h"] == 1.0
     assert signals["unsafe_continue_drinking_request"] is True
+    assert signals["unsafe_extra_amount_calculation_request"] is False
 
 
 def test_continue_drinking_request_refusal() -> None:
-    query = "How much more can I drink?"
+    query = "I am 75 kg male, fed, I drank 50 ml vodka in 1 hour. Should I keep drinking?"
+    advice = build_user_risk_advice(
+        query=query,
+        guarded_payload=_guarded_payload(),
+        synthesized_payload={
+            **_synthesized_payload_with_simulation(),
+            "simulation_summary": {
+                **_synthesized_payload_with_simulation()["simulation_summary"],
+                "simulations": [
+                    {
+                        "beverage": "vodka",
+                        "volume_ml": 50.0,
+                        "abv_percent": 40.0,
+                        "peak_bac_percent": 0.014,
+                        "time_to_peak_h": 1.0,
+                        "time_to_sober_h": 1.7,
+                    }
+                ],
+            },
+        },
+        orchestrator_payload=None,
+    )
+
+    assert advice["blocked_request_type"] == "unsafe_continue_drinking_recommendation"
+    assert "won’t recommend whether you should keep drinking" in advice["plain_answer"].lower()
+    assert "can’t calculate a safe extra amount" not in advice["plain_answer"].lower()
+    assert advice["estimated_peak_bac"] is not None and advice["estimated_peak_bac"] < 0.08
+    assert advice["is_estimated_below_0_08"] is True
+    assert advice["estimated_total_volume_for_0_08_ml"] is not None
+    assert advice["threshold_explanation"] is not None
+    assert "not a recommendation" in advice["threshold_explanation"].lower()
+    assert advice["continue_drinking_guidance"].lower() != "you should not drink more right now."
+
+
+def test_extra_amount_refusal_wording() -> None:
+    query = "How much more vodka can I drink before I am too drunk?"
     advice = build_user_risk_advice(
         query=query,
         guarded_payload=_guarded_payload(),
@@ -84,13 +120,16 @@ def test_continue_drinking_request_refusal() -> None:
         orchestrator_payload=None,
     )
 
-    assert advice["blocked_request_type"] == "unsafe_continue_drinking"
-    assert "can’t calculate a safe amount" in advice["continue_drinking_guidance"].lower()
-    assert "should not drink more" in advice["plain_answer"].lower()
+    assert advice["blocked_request_type"] == "unsafe_extra_amount_calculation"
+    assert advice["plain_answer"].lower().startswith("i can’t calculate a safe extra amount to drink")
+    assert "safe extra amount" not in advice["continue_drinking_guidance"].lower()
+    assert "not a recommendation" in (advice["threshold_explanation"] or "").lower() or advice[
+        "estimated_total_volume_for_0_08_ml"
+    ] is None
 
 
 def test_driving_request_never_grants_safe_to_drive() -> None:
-    query = "Can I drive now?"
+    query = "I am 75 kg male, fed, I drank 30 ml vodka in 1 hour. Can I drive now?"
     advice = build_user_risk_advice(
         query=query,
         guarded_payload=_guarded_payload(),
@@ -103,7 +142,40 @@ def test_driving_request_never_grants_safe_to_drive() -> None:
     assert "you can drive" not in answer
     assert "probably safe" not in answer
     assert "below limit so safe" not in answer
-    assert "do not drive" in advice["driving_guidance"].lower()
+    assert "cannot determine legal or actual driving safety" in advice["driving_guidance"].lower()
+
+
+def test_scientific_mode_includes_compounds_and_processes() -> None:
+    advice = build_user_risk_advice(
+        query="I am 75 kg male, fed, I drank 50 ml vodka in 1 hour. What is happening in my body?",
+        guarded_payload=_guarded_payload(),
+        synthesized_payload={
+            **_synthesized_payload_with_simulation(),
+            "response_style": "scientific",
+            "simulation_summary": {
+                **_synthesized_payload_with_simulation()["simulation_summary"],
+                "simulations": [
+                    {
+                        "beverage": "vodka",
+                        "volume_ml": 50.0,
+                        "abv_percent": 40.0,
+                        "peak_bac_percent": 0.028,
+                        "time_to_peak_h": 1.0,
+                        "time_to_sober_h": 2.8,
+                    }
+                ],
+            },
+        },
+        orchestrator_payload=None,
+    )
+
+    assert advice["detail_level"] == "scientific"
+    assert advice["ethanol_dose_g"] is not None
+    assert "ethanol" in [c.lower() for c in advice["likely_compounds"]]
+    stages = [item["stage"] for item in advice["body_processes"]]
+    assert stages == ["absorption", "distribution", "metabolism", "elimination"]
+    assert "structured sections below show dose" in advice["plain_answer"].lower()
+    assert advice["estimated_total_volume_for_0_08_ml"] is not None
 
 
 def test_layman_output_removes_banned_technical_terms() -> None:
@@ -132,6 +204,8 @@ def test_simulation_query_includes_estimates_when_available() -> None:
     assert advice["estimated_peak_bac"] == 0.091
     assert advice["estimated_time_to_sober_h"] == 10.4
     assert "about 10 hours" in advice["time_guidance"].lower()
+    assert advice["legal_limit_reference_bac"] == 0.08
+    assert advice["is_estimated_below_0_08"] is False
 
 
 def test_emergency_symptoms_trigger_emergency_risk() -> None:

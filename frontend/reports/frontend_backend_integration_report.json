@@ -1,0 +1,15 @@
+{
+  "api_client_tests_passed": true,
+  "component_tests_passed": true,
+  "intake_form_tests_passed": true,
+  "internals_hidden_by_default": true,
+  "debug_gated": true,
+  "local_dev_docs_updated": true,
+  "safe_for_supabase_artifact_phase": true,
+  "validation": {
+    "frontend_lint": "passed",
+    "frontend_test_run": "passed",
+    "frontend_build": "passed",
+    "backend_contract_pytest": "passed"
+  }
+}

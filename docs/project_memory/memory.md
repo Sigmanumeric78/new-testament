@@ -888,3 +888,67 @@ Update (2026-05-18):
   - artifacts externalized (Supabase planned)
   - Docker image code-first
   - GHCR + Azure Container Apps planned for later phases
+
+## 2026-05-18 — Phase 10C.1 + 10C.2 + 10C.3 (UX Upgrade + Chemical Explorer)
+
+Completed:
+- Implemented frontend UX polish while preserving Ask/Intake pipeline behavior.
+- Added local path-based frontend routing:
+  - `/` -> Ask page
+  - `/explorer` -> Chemical Explorer page
+- Added top navigation in header (Ask / Chemical Explorer) with deterministic local navigation state.
+
+Backend Chemical Explorer (Phase 10C.2):
+- Added `backend/services/chemical_catalog.py`:
+  - Deterministic in-memory catalog from:
+    - `data/processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv`
+    - local PubChem JSON/SDF roots under `data/raw/06_pubchem_cheminformatics/`
+  - Computes per-compound:
+    - identity metadata (name, normalized name, CID)
+    - class/category
+    - beverage coverage
+    - 3D conformer availability
+    - inferred metabolism/toxicity relevance
+- Added `backend/api/chemical_routes.py` endpoints:
+  - `GET /chemicals`
+  - `GET /chemicals/{compound_id}`
+  - `GET /chemicals/{compound_id}/conformer`
+- Integrated chemical routes into `backend/api/main.py`.
+
+Frontend Chemical Explorer (Phase 10C.3):
+- Added new frontend modules:
+  - `frontend/src/lib/chemicalTypes.ts`
+  - `frontend/src/lib/chemicalApi.ts`
+- Added new pages/components:
+  - `frontend/src/pages/ChemicalExplorerPage.tsx`
+  - `frontend/src/components/ChemicalSearchBar.tsx`
+  - `frontend/src/components/ChemicalFilterPanel.tsx`
+  - `frontend/src/components/ChemicalList.tsx`
+  - `frontend/src/components/ChemicalCard.tsx`
+  - `frontend/src/components/ChemicalDetailPanel.tsx`
+  - `frontend/src/components/Chemical3DViewer.tsx`
+- Implemented search/filter/pagination/detail flow and conformer fetch.
+- Implemented 3D viewer behavior:
+  - Attempts 3Dmol.js runtime load for SDF rendering and style switching (stick/line) + reset view.
+  - Graceful fallback when conformer/model engine is unavailable.
+
+Tests added/updated:
+- Backend:
+  - `backend/tests/test_chemical_explorer_api.py`
+- Frontend:
+  - `frontend/src/components/ChemicalExplorerPage.test.tsx`
+  - `frontend/src/App.test.tsx`
+  - Existing ask/result/query tests preserved and passing.
+
+Validation status:
+- Backend validation command passed:
+  - `PYTHONPATH=backend python3 -m pytest -q backend/tests/test_chemical_explorer_api.py backend/tests/test_api_backend.py`
+- Frontend validation commands passed:
+  - `cd frontend && npm run test:run`
+  - `cd frontend && npm run build`
+
+Safety/product constraints preserved:
+- Existing `/ask` and `/intake` safety behavior unchanged.
+- No deployment changes.
+- No auth/MongoDB/Supabase execution added.
+- Read-only chemical endpoints; no graph/vector mutation.

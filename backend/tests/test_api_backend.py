@@ -23,6 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 pytestmark = pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="fastapi is not installed")
 
 if FASTAPI_AVAILABLE:
+    from api.main import ALLOWED_CORS_ORIGINS
     from api.health import health_check
     from api.routes import ask_endpoint, intake_endpoint, route_endpoint
     from api.schemas import AskRequest, IntakeRequest, QueryRequest
@@ -36,6 +37,18 @@ EXPECTED_ASK_KEYS: Set[str] = {
     "estimated_peak_bac",
     "estimated_time_to_sober_h",
     "estimated_time_to_peak_h",
+    "ethanol_dose_g",
+    "drink_abv_percent",
+    "drink_volume_ml",
+    "legal_limit_reference_bac",
+    "is_estimated_below_0_08",
+    "estimated_total_volume_for_0_08_ml",
+    "estimated_additional_volume_to_0_08_ml",
+    "threshold_explanation",
+    "beverage_type",
+    "likely_compounds",
+    "body_processes",
+    "detail_level",
     "driving_guidance",
     "continue_drinking_guidance",
     "hydration_guidance",
@@ -161,6 +174,12 @@ def test_health_endpoint_returns_valid_json() -> None:
     assert "missing_required" in artifact
 
 
+def test_cors_origins_include_local_5173_and_no_wildcard() -> None:
+    assert "http://localhost:5173" in ALLOWED_CORS_ORIGINS
+    assert "http://127.0.0.1:5173" in ALLOWED_CORS_ORIGINS
+    assert "*" not in ALLOWED_CORS_ORIGINS
+
+
 def test_route_endpoint_works() -> None:
     payload = route_endpoint(QueryRequest(query="Why does whisky hit harder than beer?"))
     assert "intent" in payload
@@ -176,12 +195,9 @@ def test_ask_continue_drinking_query_is_safe() -> None:
     assert "safe to drive" not in payload["answer"].lower()
     assert "safe to drink more" not in payload["answer"].lower()
     guidance_lower = payload["continue_drinking_guidance"].lower()
-    assert (
-        "should not drink more" in payload["answer"].lower()
-        or "can't calculate a safe amount" in guidance_lower
-        or "can’t calculate a safe amount" in guidance_lower
-    )
-    assert payload["blocked_request_type"] == "unsafe_continue_drinking"
+    assert "safe extra amount" not in payload["answer"].lower()
+    assert "recommend using this app to decide whether to drink more" in guidance_lower or "increase impairment risk" in guidance_lower
+    assert payload["blocked_request_type"] == "unsafe_continue_drinking_recommendation"
     assert payload["advisor_fallback_used"] in {True, False}
     assert payload["synthesis_blocked"] in {True, False}
     assert isinstance(payload["blocked_synthesis_reasons"], list)
@@ -213,6 +229,77 @@ def test_ask_driving_query_blocks_safe_to_drive_language(monkeypatch: Any) -> No
     assert payload["advisor_fallback_used"] is True
     assert payload["synthesis_blocked"] is True
     assert payload["blocked_synthesis_reasons"]
+
+
+def test_ask_extra_amount_query_uses_extra_amount_refusal() -> None:
+    query = "How much more vodka can I drink before I am too drunk?"
+    payload = ask_endpoint(AskRequest(query=query))
+    assert payload["blocked_request_type"] == "unsafe_extra_amount_calculation"
+    assert payload["answer"].lower().startswith("i can’t calculate a safe extra amount to drink")
+    assert "not a recommendation" in (payload.get("threshold_explanation") or "").lower() or payload.get(
+        "estimated_total_volume_for_0_08_ml"
+    ) is None
+
+
+def test_low_bac_keep_drinking_query_has_threshold_context_without_extra_permission() -> None:
+    query = "I am 75 kg male, fed, I drank 50 ml vodka in 1 hour. Should I keep drinking?"
+    payload = ask_endpoint(AskRequest(query=query, response_style="layman"))
+
+    assert payload["blocked_request_type"] == "unsafe_continue_drinking_recommendation"
+    assert payload["estimated_peak_bac"] is not None
+    assert float(payload["estimated_peak_bac"]) < 0.08
+    assert payload["is_estimated_below_0_08"] is True
+    assert payload["estimated_total_volume_for_0_08_ml"] is not None
+    assert payload["legal_limit_reference_bac"] == 0.08
+    answer = payload["answer"].lower()
+    assert not answer.startswith("i can’t calculate")
+    assert "you can drink" not in answer
+    assert "not a recommendation" in (payload["threshold_explanation"] or "").lower()
+    assert payload["continue_drinking_guidance"].lower() != "you should not drink more right now."
+
+
+def test_ask_scientific_mode_returns_analysis_fields() -> None:
+    query = "I am 75 kg male, fed, I drank 50 ml vodka in 1 hour. What is happening in my body?"
+    payload = ask_endpoint(AskRequest(query=query, response_style="scientific"))
+    assert payload["detail_level"] == "scientific"
+    assert payload["ethanol_dose_g"] is not None
+    assert payload["threshold_explanation"]
+    assert payload["estimated_total_volume_for_0_08_ml"] is not None
+    assert isinstance(payload["likely_compounds"], list)
+    assert isinstance(payload["body_processes"], list)
+    assert payload["answer"].lower().count("estimated peak bac") <= 1
+
+
+def test_technical_mode_is_more_detailed_than_layman() -> None:
+    query = "I am 75 kg male, fed, I drank 50 ml vodka in 1 hour. What is happening in my body?"
+    layman = ask_endpoint(AskRequest(query=query, response_style="layman"))
+    technical = ask_endpoint(AskRequest(query=query, response_style="technical"))
+    scientific = ask_endpoint(AskRequest(query=query, response_style="scientific"))
+
+    assert layman["detail_level"] == "layman"
+    assert technical["detail_level"] == "technical"
+    assert scientific["detail_level"] == "scientific"
+    assert layman["answer"]
+    assert technical["answer"]
+    assert scientific["answer"]
+    assert "ADH" in technical["answer"] or "ALDH" in technical["answer"] or "CYP2E1" in technical["answer"]
+    assert scientific["likely_compounds"] or scientific["body_processes"]
+
+
+def test_low_bac_driving_guidance_is_strict_without_safe_to_drive_permission() -> None:
+    payload = ask_endpoint(
+        AskRequest(query="I am 75 kg male, fed, I drank 30 ml vodka in 1 hour. Can I drive?", response_style="layman")
+    )
+    answer = payload["answer"].lower()
+    guidance = payload["driving_guidance"].lower()
+    assert payload["blocked_request_type"] == "unsafe_driving_check"
+    assert answer.startswith("i can’t tell you that you are safe to drive") or answer.startswith(
+        "i can't tell you that you are safe to drive"
+    )
+    assert "you can drive" not in answer
+    assert "probably safe" not in answer
+    assert "below limit so safe" not in answer
+    assert "cannot determine legal or actual driving safety" in guidance
 
 
 def test_ask_emergency_query_returns_emergency_guidance() -> None:

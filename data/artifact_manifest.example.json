@@ -267,7 +267,7 @@
     {
       "artifact_id": "neo4j_graph_schema_design",
       "category": "neo4j_initialization_inputs",
-      "local_path": "rag/neo4j/neo4j_graph_schema_design.md",
+      "local_path": "backend/rag/neo4j/neo4j_graph_schema_design.md",
       "required_for": ["neo4j_rebuild"],
       "required": true,
       "expected_type": "md",
@@ -278,7 +278,7 @@
     {
       "artifact_id": "weaviate_schema_design",
       "category": "weaviate_schema_design_inputs",
-      "local_path": "rag/weaviate/weaviate_schema_design.md",
+      "local_path": "backend/rag/weaviate/weaviate_schema_design.md",
       "required_for": ["weaviate_schema_init"],
       "required": true,
       "expected_type": "md",

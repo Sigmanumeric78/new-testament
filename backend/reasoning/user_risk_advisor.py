@@ -30,6 +30,17 @@ BANNED_TECHNICAL_TERMS: Tuple[str, ...] = (
     "internal fallback",
 )
 
+INFRA_BANNED_TERMS: Tuple[str, ...] = tuple(
+    term
+    for term in BANNED_TECHNICAL_TERMS
+    if term
+    not in {
+        "adh",
+        "aldh",
+        "cyp2e1",
+    }
+)
+
 BEVERAGE_TOKENS: Tuple[str, ...] = (
     "whisky",
     "whiskey",
@@ -51,17 +62,27 @@ WORD_NUMBERS: Mapping[str, float] = {
 }
 
 UNSAFE_REQUEST_PATTERNS: Mapping[str, Tuple[str, ...]] = {
-    "unsafe_continue_drinking": (
-        r"\bhow\s+much\s+more\s+can\s+i\s+drink\b",
-        r"\bshould\s+i\s+keep\s+drinking\b",
-        r"\bkeep\s+drinking\b",
-        r"\bsafe\s+amount\s+to\s+drink\s+more\b",
+    "unsafe_extra_amount_calculation": (
+        r"\bhow\s+much\s+more\s+\w+\s+can\s+i\s+drink\s+before\b",
+        r"\bhow\s+much\s+more\s+can\s+i\s+drink\s+before\b",
+        r"\bhow\s+many\s+more\s+shots?\s+until\b",
+        r"\bwhat\s+amount\s+is\s+still\s+safe\b",
+        r"\bhow\s+much\s+alcohol\s+can\s+i\s+consume\s+and\s+still\b",
         r"\bhow\s+much\s+before\s+i\s+am\s+too\s+drunk\b",
         r"\bhow\s+much\s+before\s+i\s+am\s+too\s+hungover\b",
         r"\bhow\s+much\s+before\s+hangover\b",
         r"\bhow\s+much\s+before\s+driving\b",
         r"\bbefore\s+i\s+am\s+too\s+hungover\b",
         r"\bbefore\s+toxic\b",
+    ),
+    "unsafe_continue_drinking_recommendation": (
+        r"\bshould\s+i\s+keep\s+drinking\b",
+        r"\bcan\s+i\s+keep\s+drinking\b",
+        r"\bshould\s+i\s+drink\s+more\b",
+        r"\bcan\s+i\s+have\s+another\s+drink\b",
+        r"\bhow\s+much\s+more\s+can\s+i\s+drink\b",
+        r"\bkeep\s+drinking\b",
+        r"\bsafe\s+amount\s+to\s+drink\s+more\b",
     ),
     "unsafe_driving_check": (
         r"\bcan\s+i\s+drive\b",
@@ -86,8 +107,13 @@ DRIVING_BLOCKED_REFUSAL = (
 )
 
 CONTINUE_DRINKING_BLOCKED_REFUSAL = (
-    "I can’t calculate a safe amount to keep drinking. "
-    "You should not drink more right now."
+    "I won’t recommend continuing to drink. "
+    "I can estimate your current alcohol risk and what is happening in your body."
+)
+
+EXTRA_AMOUNT_BLOCKED_REFUSAL = (
+    "I can’t calculate a safe extra amount to drink. "
+    "I can estimate your current risk instead."
 )
 
 EMERGENCY_PATTERNS: Tuple[str, ...] = (
@@ -110,6 +136,8 @@ RISK_LEVELS: Tuple[str, ...] = (
     "very_high",
     "possible_medical_emergency",
 )
+
+LEGAL_LIMIT_REFERENCE_BAC = 0.08
 
 
 def _clean_text(value: Any) -> str:
@@ -261,6 +289,16 @@ def _detect_unsafe_request_type(query: str) -> Optional[str]:
         for pattern in patterns:
             if re.search(pattern, q):
                 return request_type
+    if re.search(r"\bhow\s+drunk\s+am\s+i\b", q) or re.search(r"\bhow\s+much\s+alcohol\s+is\s+in\s+my\s+body\b", q):
+        return "informational_current_risk"
+    if re.search(r"\bwhat\s+is\s+happening\s+in\s+my\s+body\b", q):
+        return "informational_current_risk"
+    if re.search(r"\bwhat\s+will\s+it\s+do\s+to\s+me\b", q):
+        return "informational_current_risk"
+    if re.search(r"\bhow\s+long\s+to\s+clear\b", q) or re.search(r"\btime\s+to\s+sober\b", q):
+        return "informational_current_risk"
+    if re.search(r"\bwhat\s+chemicals\s+are\s+in\s+this\s+drink\b", q):
+        return "informational_current_risk"
     return None
 
 
@@ -284,7 +322,12 @@ def extract_query_signals(query: str) -> Dict[str, Any]:
         "drink_type": _extract_beverage(text),
         "amount_ml": _extract_amount_ml(text),
         "duration_h": _extract_duration_h(text),
-        "unsafe_continue_drinking_request": unsafe_type == "unsafe_continue_drinking",
+        "unsafe_continue_drinking_request": unsafe_type in {
+            "unsafe_continue_drinking_recommendation",
+            "unsafe_extra_amount_calculation",
+        },
+        "unsafe_continue_drinking_recommendation_request": unsafe_type == "unsafe_continue_drinking_recommendation",
+        "unsafe_extra_amount_calculation_request": unsafe_type == "unsafe_extra_amount_calculation",
         "unsafe_driving_request": unsafe_type == "unsafe_driving_check",
         "unsafe_toxic_threshold_request": unsafe_type == "unsafe_toxic_threshold",
         "unsafe_request_type": unsafe_type,
@@ -337,6 +380,126 @@ def _extract_toxicity_summary(
     return None
 
 
+def _determine_detail_level(
+    synthesized_payload: Optional[Mapping[str, Any]],
+    orchestrator_payload: Optional[Mapping[str, Any]],
+) -> str:
+    style = ""
+    if synthesized_payload:
+        style = _normalize_text(synthesized_payload.get("response_style"))
+    if not style and orchestrator_payload:
+        route = orchestrator_payload.get("route")
+        if isinstance(route, Mapping):
+            style = _normalize_text(route.get("response_style"))
+    if style in {"layman", "technical", "scientific"}:
+        return style
+    return "layman"
+
+
+def _extract_beverage_from_sim_or_signals(
+    first_sim: Optional[Mapping[str, Any]],
+    signals: Mapping[str, Any],
+) -> Optional[str]:
+    beverage = _clean_text(first_sim.get("beverage")) if first_sim else ""
+    if beverage:
+        return _normalize_beverage(beverage)
+    signal_beverage = _clean_text(signals.get("drink_type"))
+    if signal_beverage:
+        return _normalize_beverage(signal_beverage)
+    return None
+
+
+def _likely_compounds_for_beverage(beverage_type: Optional[str]) -> List[str]:
+    beverage = _normalize_text(beverage_type)
+    if beverage in {"vodka"}:
+        return [
+            "ethanol",
+            "water",
+            "trace congeners",
+            "minor volatile compounds",
+        ]
+    if beverage in {"whisky", "whiskey", "bourbon", "brandy"}:
+        return [
+            "ethanol",
+            "water",
+            "acetaldehyde",
+            "ethyl acetate",
+            "fusel alcohols",
+            "congeners",
+            "phenolic and lactone-like flavor compounds",
+        ]
+    if beverage == "wine":
+        return [
+            "ethanol",
+            "organic acids",
+            "polyphenols",
+            "tannins",
+            "sulfites",
+            "histamine",
+            "tyramine",
+        ]
+    if beverage == "beer":
+        return [
+            "ethanol",
+            "water",
+            "organic acids",
+            "polyphenols",
+            "trace congeners",
+        ]
+    if beverage in {"rum", "gin", "tequila"}:
+        return ["ethanol", "water", "congeners", "volatile aroma compounds"]
+    return []
+
+
+def _standard_abv_percent(beverage_type: Optional[str]) -> Optional[float]:
+    beverage = _normalize_text(beverage_type)
+    defaults = {
+        "vodka": 40.0,
+        "whisky": 40.0,
+        "whiskey": 40.0,
+        "brandy": 40.0,
+        "rum": 40.0,
+        "gin": 40.0,
+        "tequila": 40.0,
+        "wine": 12.0,
+        "beer": 5.0,
+    }
+    return defaults.get(beverage)
+
+
+def _build_body_processes() -> List[Dict[str, Any]]:
+    return [
+        {
+            "stage": "absorption",
+            "plain_explanation": "Alcohol moves from your stomach and small intestine into your blood.",
+            "technical_explanation": (
+                "Absorption is usually fastest in the small intestine and can be delayed by food."
+            ),
+        },
+        {
+            "stage": "distribution",
+            "plain_explanation": "Alcohol spreads through body water, including your brain.",
+            "technical_explanation": (
+                "Distribution depends on total body water and contributes to blood-brain exposure."
+            ),
+        },
+        {
+            "stage": "metabolism",
+            "plain_explanation": "Your liver breaks down most alcohol over time.",
+            "technical_explanation": (
+                "Hepatic metabolism is mainly via ADH and ALDH, with CYP2E1 contributing at higher exposure."
+            ),
+        },
+        {
+            "stage": "elimination",
+            "plain_explanation": "Alcohol leaves your body gradually; you cannot speed this up quickly.",
+            "technical_explanation": (
+                "Elimination follows a limited-rate process; hydration improves comfort but not clearance rate."
+            ),
+        },
+    ]
+
+
 def _risk_from_bac(peak_bac: Optional[float], *, emergency: bool) -> str:
     if emergency:
         return "possible_medical_emergency"
@@ -371,12 +534,13 @@ def _risk_summary(risk_level: str, peak_bac: Optional[float]) -> str:
     return "I do not have enough data for a precise risk estimate."
 
 
-def _sanitize_plain_text(text: str) -> str:
+def _sanitize_plain_text(text: str, *, mode: str = "layman") -> str:
     output = _clean_text(text)
     if not output:
         return ""
 
-    for term in BANNED_TECHNICAL_TERMS:
+    banned_terms = BANNED_TECHNICAL_TERMS if mode == "layman" else INFRA_BANNED_TERMS
+    for term in banned_terms:
         output = re.sub(rf"\b{re.escape(term)}\b", "", output, flags=re.IGNORECASE)
 
     output = re.sub(r"\s+", " ", output).strip()
@@ -396,6 +560,75 @@ def _display_hours(hours: Optional[float]) -> Optional[str]:
     if rounded <= 0:
         rounded = 1
     return str(rounded)
+
+
+def _round_to_nearest_10_ml(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    if value <= 0:
+        return 0.0
+    return float(int(round(value / 10.0) * 10))
+
+
+def _estimate_threshold_total_volume_ml_from_pbpk_anchor(
+    *,
+    current_peak_bac: Optional[float],
+    current_volume_ml: Optional[float],
+    target_bac: float = LEGAL_LIMIT_REFERENCE_BAC,
+    max_volume_ml: float = 1000.0,
+) -> Optional[float]:
+    if current_peak_bac is None or current_volume_ml is None:
+        return None
+    if current_peak_bac <= 0.0 or current_volume_ml <= 0.0:
+        return None
+
+    # Deterministic monotonic approximation anchored to the observed PBPK result.
+    def estimated_peak_for_volume(volume_ml: float) -> float:
+        return current_peak_bac * (volume_ml / current_volume_ml)
+
+    low = 0.0
+    high = max_volume_ml
+    if estimated_peak_for_volume(high) < target_bac:
+        return None
+
+    for _ in range(40):
+        mid = (low + high) / 2.0
+        if estimated_peak_for_volume(mid) >= target_bac:
+            high = mid
+        else:
+            low = mid
+
+    return _round_to_nearest_10_ml(high)
+
+
+def _estimate_threshold_total_volume_ml_widmark(
+    *,
+    sex: Optional[str],
+    weight_kg: Optional[float],
+    drink_abv_percent: Optional[float],
+    target_bac: float = LEGAL_LIMIT_REFERENCE_BAC,
+) -> Optional[float]:
+    if weight_kg is None or weight_kg <= 0:
+        return None
+    if drink_abv_percent is None or drink_abv_percent <= 0:
+        return None
+
+    sex_norm = _normalize_text(sex)
+    if sex_norm == "female":
+        r_value = 0.55
+    elif sex_norm == "male":
+        r_value = 0.68
+    else:
+        r_value = 0.62
+
+    # Widmark-style approximation with kilograms and grams.
+    ethanol_g_needed = target_bac * r_value * weight_kg * 10.0
+    abv_fraction = drink_abv_percent / 100.0
+    if abv_fraction <= 0.0:
+        return None
+
+    total_ml = ethanol_g_needed / (0.789 * abv_fraction)
+    return _round_to_nearest_10_ml(total_ml)
 
 
 def _is_scientific_query(query: str) -> bool:
@@ -527,13 +760,20 @@ def build_user_risk_advice(
 ) -> Dict[str, Any]:
     signals = extract_query_signals(query)
     query_norm = _normalize_text(query)
+    detail_level = _determine_detail_level(synthesized_payload, orchestrator_payload)
 
     first_sim = _extract_first_simulation(synthesized_payload, orchestrator_payload)
     toxicity_summary = _extract_toxicity_summary(synthesized_payload, orchestrator_payload)
+    beverage_type = _extract_beverage_from_sim_or_signals(first_sim, signals)
 
     estimated_peak_bac = _safe_float(first_sim.get("peak_bac_percent")) if first_sim else None
     estimated_time_to_sober_h = _safe_float(first_sim.get("time_to_sober_h")) if first_sim else None
     estimated_time_to_peak_h = _safe_float(first_sim.get("time_to_peak_h")) if first_sim else None
+    drink_abv_percent = _safe_float(first_sim.get("abv_percent")) if first_sim else None
+    drink_volume_ml = _safe_float(first_sim.get("volume_ml")) if first_sim else _safe_float(signals.get("amount_ml"))
+    ethanol_dose_g = None
+    if drink_abv_percent is not None and drink_volume_ml is not None:
+        ethanol_dose_g = round(drink_volume_ml * (drink_abv_percent / 100.0) * 0.789, 6)
 
     emergency = bool(signals.get("emergency_symptoms_detected"))
     scientific_query = _is_scientific_query(query)
@@ -552,31 +792,77 @@ def build_user_risk_advice(
         "Seek medical help for severe symptoms.",
     ):
         source_answer = re.sub(re.escape(note), " ", source_answer, flags=re.IGNORECASE)
-    source_answer = _sanitize_plain_text(re.sub(r"\s+", " ", source_answer).strip())
+    source_answer = _sanitize_plain_text(re.sub(r"\s+", " ", source_answer).strip(), mode=detail_level)
 
     risk_level = _risk_from_bac(estimated_peak_bac, emergency=emergency)
     blocked_request_type = signals.get("unsafe_request_type")
     driving_query = bool(signals.get("mentions_drive")) or blocked_request_type == "unsafe_driving_check"
 
-    driving_guidance = (
-        "Do not drive based on this estimate. "
-        "This app cannot determine legal or actual driving safety. "
-        "Arrange a ride or wait."
+    legal_limit_reference_bac = LEGAL_LIMIT_REFERENCE_BAC
+    is_estimated_below_0_08 = None if estimated_peak_bac is None else bool(estimated_peak_bac < legal_limit_reference_bac)
+
+    summary_payload = synthesized_payload.get("simulation_summary") if synthesized_payload else None
+    safe_defaults = summary_payload.get("safe_defaults") if isinstance(summary_payload, Mapping) else None
+    default_sex = _clean_text(safe_defaults.get("sex")) if isinstance(safe_defaults, Mapping) else ""
+    default_weight = _safe_float(safe_defaults.get("weight")) if isinstance(safe_defaults, Mapping) else None
+
+    abv_for_threshold = drink_abv_percent if drink_abv_percent is not None else _standard_abv_percent(beverage_type)
+    threshold_total_volume_ml = _estimate_threshold_total_volume_ml_from_pbpk_anchor(
+        current_peak_bac=estimated_peak_bac,
+        current_volume_ml=drink_volume_ml,
+        target_bac=legal_limit_reference_bac,
+        max_volume_ml=1000.0,
     )
-    if estimated_peak_bac is not None and estimated_peak_bac >= 0.08:
+    if threshold_total_volume_ml is None:
+        threshold_total_volume_ml = _estimate_threshold_total_volume_ml_widmark(
+            sex=_clean_text(signals.get("sex")) or default_sex or None,
+            weight_kg=_safe_float(signals.get("weight_kg")) or default_weight,
+            drink_abv_percent=abv_for_threshold,
+            target_bac=legal_limit_reference_bac,
+        )
+
+    threshold_additional_volume_ml: Optional[float] = None
+    if threshold_total_volume_ml is not None and drink_volume_ml is not None:
+        threshold_additional_volume_ml = _round_to_nearest_10_ml(max(0.0, threshold_total_volume_ml - drink_volume_ml))
+
+    threshold_explanation: Optional[str] = None
+    if threshold_total_volume_ml is not None:
+        beverage_text = beverage_type or "this drink"
+        abv_text = ""
+        if abv_for_threshold is not None:
+            abv_text = f"{abv_for_threshold:g}% "
+        threshold_explanation = (
+            f"Under the same assumptions, a total intake around {threshold_total_volume_ml:g} ml of {abv_text}{beverage_text} "
+            f"could push the estimate near or above {legal_limit_reference_bac:.2f}%. "
+            "This is a risk threshold estimate, not a recommendation to drink that amount."
+        )
+
+    if estimated_peak_bac is not None and estimated_peak_bac >= legal_limit_reference_bac:
         driving_guidance = (
             "Do not drive based on this estimate. "
-            "Your estimated alcohol level is in a high-risk range. "
             "This app cannot determine legal or actual driving safety. "
             "Arrange a ride or wait."
         )
-
-    if blocked_request_type in {"unsafe_continue_drinking", "unsafe_toxic_threshold"}:
-        continue_drinking_guidance = CONTINUE_DRINKING_BLOCKED_REFUSAL
-    elif blocked_request_type == "unsafe_driving_check":
-        continue_drinking_guidance = "You should not drink more right now."
     else:
-        continue_drinking_guidance = "You should not drink more right now."
+        driving_guidance = (
+            "This app cannot determine legal or actual driving safety. "
+            "If you may need to drive, do not rely on this estimate. "
+            "Arrange a ride or wait."
+        )
+
+    if blocked_request_type == "unsafe_extra_amount_calculation":
+        continue_drinking_guidance = "I do not recommend using this app to decide whether to drink more."
+    elif blocked_request_type == "unsafe_continue_drinking_recommendation":
+        if risk_level in {"moderate", "high", "very_high", "possible_medical_emergency"}:
+            continue_drinking_guidance = "Continuing to drink would increase impairment risk."
+        else:
+            continue_drinking_guidance = "I do not recommend using this app to decide whether to drink more."
+    elif blocked_request_type in {"unsafe_driving_check", "unsafe_toxic_threshold"}:
+        continue_drinking_guidance = "I do not recommend using this app to decide whether to drink more."
+    elif risk_level in {"moderate", "high", "very_high", "possible_medical_emergency"}:
+        continue_drinking_guidance = "Continuing to drink would increase impairment risk."
+    else:
+        continue_drinking_guidance = "I do not recommend using this app to decide whether to drink more."
 
     if estimated_time_to_sober_h is not None:
         display_h = _display_hours(estimated_time_to_sober_h) or "unknown"
@@ -629,9 +915,36 @@ def build_user_risk_advice(
         plain_parts.append("Do not give more alcohol.")
     else:
         if blocked_request_type == "unsafe_driving_check":
-            plain_parts.append(DRIVING_BLOCKED_REFUSAL)
-        elif blocked_request_type in {"unsafe_continue_drinking", "unsafe_toxic_threshold"}:
-            plain_parts.append(CONTINUE_DRINKING_BLOCKED_REFUSAL)
+            plain_parts.append(
+                "I can’t tell you that you are safe to drive. "
+                "Based on this estimate, do not drive. "
+                "This app cannot determine legal or actual driving safety."
+            )
+        elif blocked_request_type == "unsafe_continue_drinking_recommendation":
+            if estimated_peak_bac is not None:
+                below_text = "below" if estimated_peak_bac < legal_limit_reference_bac else "at or above"
+                plain_parts.append(
+                    "I won’t recommend whether you should keep drinking. "
+                    f"Based on what you entered, your estimated peak BAC is about {_display_bac(estimated_peak_bac)}%, which is {below_text} 0.08%. "
+                    f"That is a {risk_level.replace('_', ' ')} estimated range, but alcohol can still affect judgment and reaction time."
+                )
+            else:
+                plain_parts.append(CONTINUE_DRINKING_BLOCKED_REFUSAL)
+        elif blocked_request_type == "unsafe_extra_amount_calculation":
+            if estimated_peak_bac is not None:
+                plain_parts.append(
+                    "I can’t calculate a safe extra amount to drink. "
+                    f"Based on what you already entered, your current estimated peak BAC is about {_display_bac(estimated_peak_bac)}%."
+                )
+            else:
+                plain_parts.append(EXTRA_AMOUNT_BLOCKED_REFUSAL)
+        elif blocked_request_type == "unsafe_toxic_threshold":
+            plain_parts.append(EXTRA_AMOUNT_BLOCKED_REFUSAL)
+        elif blocked_request_type == "informational_current_risk":
+            if estimated_peak_bac is not None:
+                plain_parts.append(f"Based on what you entered, your estimated peak BAC is about {_display_bac(estimated_peak_bac)}%.")
+            else:
+                plain_parts.append("Based on what you entered, I can provide a conservative current-risk estimate.")
         elif comparison_harder_query:
             plain_parts.append(
                 "Whisky can hit harder than beer because it usually has higher alcohol concentration and faster early absorption."
@@ -640,38 +953,32 @@ def build_user_risk_advice(
             plain_parts.append(
                 "Wine headaches can be linked to compounds such as sulfites, histamine, tyramine, congeners, and polyphenols in sensitive people."
             )
-            plain_parts.append("For your situation, you should not drink more right now.")
         elif sulfite_research_query:
-            plain_parts.append(
-                "Some research links sulfites with headache symptoms in sensitive people, but evidence quality can vary."
-            )
+            plain_parts.append("Some research links sulfites with headache symptoms in sensitive people, but evidence quality can vary.")
             plain_parts.append("Some supporting evidence was unavailable.")
         elif source_answer:
             plain_parts.append(source_answer)
         else:
-            plain_parts.append("For your situation, you should not drink more right now.")
+            if estimated_peak_bac is not None:
+                plain_parts.append(f"Based on what you entered, your estimated peak BAC is about {_display_bac(estimated_peak_bac)}%.")
+            else:
+                plain_parts.append("I can provide a conservative estimate from the details you shared.")
+
+        if threshold_explanation:
+            plain_parts.append(threshold_explanation)
 
         if scientific_query and evidence_signal:
             signal_norm = _normalize_text(evidence_signal)
-            if (
-                "sulfite" in signal_norm
-                or "headache" in signal_norm
-                or "histamine" in signal_norm
-                or "tyramine" in signal_norm
-            ):
+            if "sulfite" in signal_norm or "headache" in signal_norm or "histamine" in signal_norm or "tyramine" in signal_norm:
                 plain_parts.append(f"Relevant evidence includes: {evidence_signal}.")
 
-        bac_display = _display_bac(estimated_peak_bac)
-        if bac_display is not None:
-            plain_parts.append(f"Your estimated peak BAC is about {bac_display}%.")
-
-        if estimated_time_to_peak_h is not None:
-            peak_h = _display_hours(estimated_time_to_peak_h) or "unknown"
-            plain_parts.append(f"Your peak effect may be around {peak_h} hours after drinking.")
-
-        if estimated_time_to_sober_h is not None:
-            clear_h = _display_hours(estimated_time_to_sober_h) or "unknown"
-            plain_parts.append(f"It may take about {clear_h} hours to clear alcohol.")
+        if detail_level == "layman":
+            if estimated_time_to_peak_h is not None:
+                peak_h = _display_hours(estimated_time_to_peak_h) or "unknown"
+                plain_parts.append(f"Your peak effect may be around {peak_h} hours after drinking.")
+            if estimated_time_to_sober_h is not None:
+                clear_h = _display_hours(estimated_time_to_sober_h) or "unknown"
+                plain_parts.append(f"It may take about {clear_h} hours to clear alcohol.")
 
         if driving_query or estimated_peak_bac is not None:
             plain_parts.append(driving_guidance)
@@ -686,10 +993,63 @@ def build_user_risk_advice(
         plain_parts.append(risk_summary)
         plain_parts.append(hydration_guidance)
         plain_parts.append(food_guidance)
+        plain_parts.append(
+            "To make this more precise, provide: age, sex, weight, food state, drink ABV, total amount, and when you started/stopped drinking."
+        )
 
     plain_parts.append(medical_warning)
 
-    plain_answer = _sanitize_plain_text(" ".join([_clean_text(item) for item in plain_parts if _clean_text(item)]))
+    likely_compounds = _likely_compounds_for_beverage(beverage_type)
+    body_processes = _build_body_processes() if detail_level in {"technical", "scientific"} else []
+
+    plain_answer = _sanitize_plain_text(
+        " ".join([_clean_text(item) for item in plain_parts if _clean_text(item)]),
+        mode=detail_level,
+    )
+
+    if detail_level == "scientific" and not emergency:
+        scientific_intro_parts: List[str] = [
+            "Based on the supplied inputs, the model estimates your current alcohol exposure and impairment risk."
+        ]
+        if comparison_harder_query:
+            scientific_intro_parts.append(
+                "Whisky often produces a faster and higher intoxication signal than beer because of higher ABV and ethanol dose per volume."
+            )
+        if wine_headache_query:
+            scientific_intro_parts.append(
+                "For wine-related headaches, likely contributors include sulfites, histamine, tyramine, congeners, and polyphenols in sensitive people."
+            )
+        if sulfite_research_query:
+            scientific_intro_parts.append(
+                "Sulfite-related headache evidence is variable and can depend on individual sensitivity."
+            )
+            if not evidence_signal:
+                scientific_intro_parts.append("Some supporting evidence was unavailable.")
+        if estimated_peak_bac is not None:
+            direction = "below" if estimated_peak_bac < legal_limit_reference_bac else "at or above"
+            scientific_intro_parts.append(
+                f"Estimated peak BAC is about {_display_bac(estimated_peak_bac)}%, which is {direction} {legal_limit_reference_bac:.2f}%."
+            )
+        scientific_intro_parts.append(
+            "The structured sections below show dose, 0.08% threshold context, likely drink chemistry, body-processing stages, assumptions, and safety boundaries."
+        )
+        plain_answer = _sanitize_plain_text(" ".join(scientific_intro_parts), mode=detail_level)
+
+    if detail_level == "technical" and not emergency:
+        technical_parts: List[str] = []
+        if estimated_peak_bac is not None:
+            technical_parts.append(
+                f"Estimated peak BAC is about {_display_bac(estimated_peak_bac)}% with peak effect around {_display_hours(estimated_time_to_peak_h) or 'unknown'} hours."
+            )
+        if ethanol_dose_g is not None:
+            technical_parts.append(f"Estimated ethanol dose is about {round(ethanol_dose_g, 1):g} g.")
+        technical_parts.append(
+            "Alcohol absorption, distribution, hepatic metabolism (ADH/ALDH with CYP2E1 contribution), and elimination drive the time course."
+        )
+        if threshold_explanation:
+            technical_parts.append(threshold_explanation)
+        technical_parts.append("Do not use this estimate to decide whether to drive or to plan more drinking.")
+        plain_answer = _sanitize_plain_text(" ".join(technical_parts), mode=detail_level)
 
     safe_for_display = bool(_clean_text(plain_answer))
 
@@ -706,6 +1066,22 @@ def build_user_risk_advice(
         "estimated_peak_bac": round(float(estimated_peak_bac), 6) if estimated_peak_bac is not None else None,
         "estimated_time_to_sober_h": round(float(estimated_time_to_sober_h), 6) if estimated_time_to_sober_h is not None else None,
         "estimated_time_to_peak_h": round(float(estimated_time_to_peak_h), 6) if estimated_time_to_peak_h is not None else None,
+        "ethanol_dose_g": round(float(ethanol_dose_g), 6) if ethanol_dose_g is not None else None,
+        "drink_abv_percent": round(float(drink_abv_percent), 6) if drink_abv_percent is not None else None,
+        "drink_volume_ml": round(float(drink_volume_ml), 6) if drink_volume_ml is not None else None,
+        "legal_limit_reference_bac": round(float(legal_limit_reference_bac), 6),
+        "is_estimated_below_0_08": is_estimated_below_0_08,
+        "estimated_total_volume_for_0_08_ml": (
+            round(float(threshold_total_volume_ml), 6) if threshold_total_volume_ml is not None else None
+        ),
+        "estimated_additional_volume_to_0_08_ml": (
+            round(float(threshold_additional_volume_ml), 6) if threshold_additional_volume_ml is not None else None
+        ),
+        "threshold_explanation": threshold_explanation,
+        "beverage_type": beverage_type,
+        "likely_compounds": likely_compounds if detail_level in {"technical", "scientific"} else [],
+        "body_processes": body_processes if detail_level in {"technical", "scientific"} else [],
+        "detail_level": detail_level,
         "assumptions": sorted(set([_clean_text(item) for item in assumptions if _clean_text(item)])),
         "missing_info": sorted(set([_clean_text(item) for item in missing_info if _clean_text(item)])),
         "blocked_request_type": _clean_text(blocked_request_type) or None,

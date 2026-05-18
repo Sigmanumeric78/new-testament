@@ -29,6 +29,8 @@ def test_dockerfile_does_not_copy_env() -> None:
 def test_dockerignore_excludes_data_raw_and_embeddings() -> None:
     text = _read(MONOREPO_ROOT / ".dockerignore")
     assert "data/raw" in text
+    assert "data/processed" in text
+    assert "data/interim" in text
     assert "data/processed/weaviate/embedded" in text
 
 
@@ -57,3 +59,24 @@ def test_required_scripts_exist_and_executable() -> None:
     for script in scripts:
         assert script.exists(), f"missing script: {script}"
         assert os.access(script, os.X_OK), f"script is not executable: {script}"
+
+
+def test_docker_publish_workflow_exists() -> None:
+    path = MONOREPO_ROOT / ".github/workflows/docker-publish.yml"
+    assert path.exists()
+
+
+def test_docker_publish_workflow_references_backend_dockerfile_and_ghcr() -> None:
+    text = _read(MONOREPO_ROOT / ".github/workflows/docker-publish.yml")
+    assert "file: backend/Dockerfile" in text
+    assert "ghcr.io/sigmanumeric78/new-testament-api" in text
+    assert "docker/login-action" in text
+    assert "docker/setup-buildx-action" in text
+    assert "docker/build-push-action" in text
+
+
+def test_docker_publish_workflow_does_not_echo_secrets() -> None:
+    text = _read(MONOREPO_ROOT / ".github/workflows/docker-publish.yml").lower()
+    assert "echo ${{ secrets." not in text
+    assert "supabase_service_role_key" not in text
+    assert "neo4j_password" not in text

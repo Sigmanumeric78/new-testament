@@ -1,0 +1,15 @@
+{
+  "backend_ci_created": true,
+  "frontend_ci_created": true,
+  "docker_publish_created": true,
+  "ghcr_image_name": "ghcr.io/sigmanumeric78/new-testament-api",
+  "tests_updated": true,
+  "docs_created": true,
+  "safe_for_azure_container_apps_plan": true,
+  "validation": {
+    "backend_pytest": "PYTHONPATH=backend python3 -m pytest -q backend/tests/test_docker_config.py backend/tests/test_supabase_artifact_foundation.py",
+    "backend_pytest_result": "21 passed",
+    "frontend_test_build": "cd frontend && npm run test:run && npm run build",
+    "frontend_test_build_result": "passed"
+  }
+}

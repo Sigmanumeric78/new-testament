@@ -1,0 +1,9 @@
+{
+  "chemical_api_routes_added": true,
+  "chemical_catalog_built": true,
+  "chemicals_count": 132,
+  "compounds_with_3d_count": 43,
+  "conformer_endpoint_pass": true,
+  "safe_for_frontend_chemical_explorer": true,
+  "tests_passed": true
+}

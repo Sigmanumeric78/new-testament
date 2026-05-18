@@ -82,6 +82,18 @@ class AskResponse(BaseModel):
     estimated_peak_bac: Optional[float]
     estimated_time_to_sober_h: Optional[float]
     estimated_time_to_peak_h: Optional[float]
+    ethanol_dose_g: Optional[float] = None
+    drink_abv_percent: Optional[float] = None
+    drink_volume_ml: Optional[float] = None
+    legal_limit_reference_bac: Optional[float] = 0.08
+    is_estimated_below_0_08: Optional[bool] = None
+    estimated_total_volume_for_0_08_ml: Optional[float] = None
+    estimated_additional_volume_to_0_08_ml: Optional[float] = None
+    threshold_explanation: Optional[str] = None
+    beverage_type: Optional[str] = None
+    likely_compounds: List[str] = Field(default_factory=list)
+    body_processes: List[Dict[str, Any]] = Field(default_factory=list)
+    detail_level: Literal["layman", "technical", "scientific"] = "layman"
     driving_guidance: str
     continue_drinking_guidance: str
     hydration_guidance: str

@@ -1,5 +1,23 @@
 # Docker Deployment Plan (Phase 09C)
 
+## Local Full-Stack Development
+
+Terminal 1:
+
+```bash
+cd backend
+PYTHONPATH=. uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Terminal 2:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173`.
+
 ## Local Build
 
 ```bash

@@ -1,0 +1,18 @@
+{
+  "vite_strict_port_enabled": true,
+  "dev_frontend_port_check_added": true,
+  "cors_local_origins_verified": true,
+  "artifact_manifest_monorepo_paths_fixed": true,
+  "artifact_status_ok_or_expected": true,
+  "tests_passed": true,
+  "safe_for_fullstack_local_retest": true,
+  "validation": {
+    "backend_pytest": "PYTHONPATH=backend python3 -m pytest -q backend/tests/test_api_backend.py backend/tests/test_artifact_manager.py backend/tests/test_docker_config.py",
+    "backend_pytest_result": "33 passed",
+    "frontend_test_build": "cd frontend && npm run test:run && npm run build",
+    "frontend_test_build_result": "passed",
+    "build_artifact_manifest": "passed",
+    "artifact_status": "all_required_available=true",
+    "curl_health": "backend process starts locally; direct curl from separate sandbox command could not connect in this environment"
+  }
+}

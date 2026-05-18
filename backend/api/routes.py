@@ -24,9 +24,6 @@ BANNED_INTERNAL_TERMS = (
     "Weaviate",
     "causal path",
     "graph",
-    "ADH",
-    "ALDH",
-    "CYP2E1",
     "embedding",
     "vector",
     "simulator fallback",
@@ -170,6 +167,32 @@ def _build_user_response(
         "estimated_peak_bac": advice.get("estimated_peak_bac"),
         "estimated_time_to_sober_h": advice.get("estimated_time_to_sober_h"),
         "estimated_time_to_peak_h": advice.get("estimated_time_to_peak_h"),
+        "ethanol_dose_g": advice.get("ethanol_dose_g"),
+        "drink_abv_percent": advice.get("drink_abv_percent"),
+        "drink_volume_ml": advice.get("drink_volume_ml"),
+        "legal_limit_reference_bac": advice.get("legal_limit_reference_bac"),
+        "is_estimated_below_0_08": advice.get("is_estimated_below_0_08"),
+        "estimated_total_volume_for_0_08_ml": advice.get("estimated_total_volume_for_0_08_ml"),
+        "estimated_additional_volume_to_0_08_ml": advice.get("estimated_additional_volume_to_0_08_ml"),
+        "threshold_explanation": _clean_text(advice.get("threshold_explanation")) or None,
+        "beverage_type": _clean_text(advice.get("beverage_type")) or None,
+        "likely_compounds": [
+            _clean_text(item)
+            for item in list(advice.get("likely_compounds", []) or [])
+            if _clean_text(item)
+        ],
+        "body_processes": [
+            {
+                "stage": _clean_text(item.get("stage")),
+                "plain_explanation": _clean_text(item.get("plain_explanation")),
+                "technical_explanation": _clean_text(item.get("technical_explanation")) or None,
+            }
+            for item in list(advice.get("body_processes", []) or [])
+            if isinstance(item, Mapping)
+            and _clean_text(item.get("stage"))
+            and _clean_text(item.get("plain_explanation"))
+        ],
+        "detail_level": _clean_text(advice.get("detail_level")) or "layman",
         "driving_guidance": _clean_text(advice.get("driving_guidance")),
         "continue_drinking_guidance": _clean_text(advice.get("continue_drinking_guidance")),
         "hydration_guidance": _clean_text(advice.get("hydration_guidance")),

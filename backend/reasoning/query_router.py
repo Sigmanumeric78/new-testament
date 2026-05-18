@@ -373,8 +373,19 @@ def _infer_sub_intents(intent: str, query: str) -> List[str]:
             sub_intents.append("intoxication_level")
         if re.search(r"\bdrive|driving|legal\s+limit|car|ride\s+home\b", q):
             sub_intents.append("driving_safety_check")
-        if "how much more can i drink" in q or "keep drinking" in q:
-            sub_intents.append("continued_drinking_threshold_request")
+        if re.search(r"\bhow\s+much\s+more\s+can\s+i\s+drink\s+before\b", q):
+            sub_intents.append("unsafe_extra_amount_calculation")
+        elif "how much more can i drink" in q or "keep drinking" in q or "drink more" in q:
+            sub_intents.append("unsafe_continue_drinking_recommendation")
+        if (
+            "how drunk am i" in q
+            or "how much alcohol is in my body" in q
+            or "what is happening in my body" in q
+            or "what will it do to me" in q
+            or "how long to clear" in q
+            or "what chemicals are in this drink" in q
+        ):
+            sub_intents.append("informational_current_risk")
 
     elif intent == "mechanistic_explanation":
         if "why" in q:

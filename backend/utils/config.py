@@ -108,3 +108,26 @@ def get_ollama_config() -> Dict[str, str]:
         "model": os.getenv("OLLAMA_MODEL", "").strip() or "qwen2.5:3b",
     }
     return config
+
+
+def get_supabase_config(*, require: bool = False) -> Dict[str, str]:
+    _load_dotenv()
+    config = {
+        "url": os.getenv("SUPABASE_URL", "").strip(),
+        "service_role_key": os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip(),
+        "anon_key": os.getenv("SUPABASE_ANON_KEY", "").strip(),
+        "artifact_bucket": os.getenv("SUPABASE_ARTIFACT_BUCKET", "").strip() or "alcohol-intelligence-artifacts",
+    }
+    if require:
+        missing: List[str] = []
+        if not config["url"]:
+            missing.append("SUPABASE_URL")
+        if not config["service_role_key"]:
+            missing.append("SUPABASE_SERVICE_ROLE_KEY")
+        if missing:
+            raise ValueError(
+                "Missing Supabase configuration values: "
+                + ", ".join(missing)
+                + ". These are only required when running Supabase artifact scripts."
+            )
+    return config

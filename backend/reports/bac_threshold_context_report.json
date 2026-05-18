@@ -1,0 +1,9 @@
+{
+  "threshold_fields_added": true,
+  "low_bac_wording_fixed": true,
+  "extra_amount_safety_preserved": true,
+  "driving_safety_preserved": true,
+  "scientific_repetition_reduced": true,
+  "tests_passed": true,
+  "safe_for_fullstack_acceptance_rerun": true
+}

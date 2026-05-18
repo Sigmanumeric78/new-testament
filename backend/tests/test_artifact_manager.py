@@ -34,6 +34,30 @@ def test_manifest_loads_from_example() -> None:
     assert "weaviate_schema_design" in ids
 
 
+def test_manifest_schema_design_paths_point_to_backend_monorepo() -> None:
+    manifest_path = REPO_ROOT / "data/artifact_manifest.example.json"
+    specs = load_manifest(manifest_path.as_posix())
+    by_id = {spec.artifact_id: spec for spec in specs}
+
+    assert by_id["neo4j_graph_schema_design"].local_path == "backend/rag/neo4j/neo4j_graph_schema_design.md"
+    assert by_id["weaviate_schema_design"].local_path == "backend/rag/weaviate/weaviate_schema_design.md"
+
+
+def test_manifest_schema_design_files_validate_when_present() -> None:
+    manifest_path = REPO_ROOT / "data/artifact_manifest.example.json"
+    specs = load_manifest(manifest_path.as_posix())
+    filtered = [
+        spec
+        for spec in specs
+        if spec.artifact_id in {"neo4j_graph_schema_design", "weaviate_schema_design"}
+    ]
+    statuses = check_all_artifacts(filtered)
+    by_id = {status.artifact_id: status for status in statuses}
+
+    assert by_id["neo4j_graph_schema_design"].validation_status == "ok"
+    assert by_id["weaviate_schema_design"].validation_status == "ok"
+
+
 def test_missing_artifacts_detected_with_temp_manifest(tmp_path: Path) -> None:
     manifest_path = _write_manifest(
         tmp_path / "manifest.json",

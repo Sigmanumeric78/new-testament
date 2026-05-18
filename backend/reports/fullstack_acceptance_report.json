@@ -1,0 +1,12 @@
+{
+  "acceptance_script_timeout_hardened": true,
+  "driving_refusal_pass": true,
+  "extra_amount_refusal_pass": true,
+  "intake_pass": true,
+  "keep_drinking_wording_pass": true,
+  "ollama_cold_start_diagnostics_added": true,
+  "ollama_prewarm_supported": true,
+  "safe_for_docker_push_retest": true,
+  "scientific_detail_pass": true,
+  "tests_passed": true
+}
