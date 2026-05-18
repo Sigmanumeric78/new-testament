@@ -1,0 +1,93 @@
+# ============================================================
+# Secrets / credentials
+# ============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# ============================================================
+# Python / cache / test artifacts
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# ============================================================
+# Logs / runtime outputs
+# ============================================================
+*.log
+*.jsonl
+data/interim/**/app_cli_run_log.jsonl
+data/interim/**/api_request_log.jsonl
+
+# ============================================================
+# STRICT DATA POLICY
+# Do not commit raw data, processed data, embeddings, reports,
+# local vector stores, Neo4j/Weaviate exports, or generated artifacts.
+#
+# Store these externally, e.g. Azure Blob Storage, or regenerate locally.
+# ============================================================
+data/**
+
+# ============================================================
+# Raw archives / compressed dumps anywhere
+# ============================================================
+*.zip
+*.gz
+*.tar
+*.tar.gz
+*.bz2
+*.xz
+*.7z
+
+# ============================================================
+# Scientific papers / PDFs / local research copies
+# ============================================================
+*.pdf
+docs/research_papers/
+docs/legacy_outputs/
+
+# ============================================================
+# Vector / database / runtime storage
+# ============================================================
+vector_db/
+knowledge_graph/
+neo4j_data/
+weaviate_data/
+databases/
+transactions/
+graph.db/
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================================
+# Generated ML/model artifacts
+# ============================================================
+*.parquet
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# ============================================================
+# OS / editor
+# ============================================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
