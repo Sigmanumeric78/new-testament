@@ -1,0 +1,26 @@
+.env
+.git
+__pycache__
+*.pyc
+.pytest_cache
+
+# Data and large artifacts
+data/raw
+data/processed/weaviate/embedded
+data/vector_db
+data/knowledge_graph
+
+# Research and large docs
+docs/research_papers
+docs/legacy_outputs
+*.pdf
+*.parquet
+*.gz
+*.tar
+*.zip
+
+# Runtime DB state
+neo4j_data
+weaviate_data
+databases
+transactions

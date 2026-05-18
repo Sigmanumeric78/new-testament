@@ -1,3 +1,60 @@
+Latest updates:
+- Implemented Phase 09C Dockerization Foundation (code-first backend containerization):
+  - Added `Dockerfile` (Python 3.11 slim, `/app` workdir, `uvicorn api.main:app` default command).
+  - Added `.dockerignore` to exclude secrets, raw data, embeddings parquet, runtime DB dirs, and large binary artifacts from image context.
+  - Added `docker-compose.local.yml` with `host.docker.internal` wiring for Neo4j, Weaviate, and Ollama, plus Linux `host-gateway` mapping.
+  - Added backend runtime `requirements.txt` and Docker scripts:
+    - `scripts/docker_build.sh`
+    - `scripts/docker_run_api.sh`
+    - `scripts/docker_smoke_test.sh`
+  - Added Docker config tests:
+    - `tests/test_docker_config.py`
+  - Added deployment planning doc:
+    - `docs/docker_deployment_plan.md`
+  - Patched `utils/config.py` and synthesizer pathing for `OLLAMA_HOST` compatibility in Docker-hosted network scenarios.
+  - Validation executed:
+    - `python3 -m pytest -q tests/test_docker_config.py tests/test_api_backend.py` → `20 passed`
+    - Docker image build succeeded for `alcohol-intelligence-api:local`.
+    - Docker smoke test succeeded (`scripts/docker_smoke_test.sh`), including `/health` and `/ask` safety checks.
+  - Added Dockerization validation report:
+    - `data/interim/api/dockerization_validation_report.json`
+  - Final gate: `safe_for_supabase_artifact_phase = true`.
+
+- Implemented Phase 09A FastAPI backend package and integration:
+  - Added `api/__init__.py`, `api/main.py`, `api/schemas.py`, `api/routes.py`, `api/health.py`, `api/logging_utils.py`.
+  - Added `tests/test_api_backend.py` and `data/interim/api/api_backend_validation_report.json`.
+  - Exposed endpoints: `GET /health`, `POST /route`, `POST /orchestrate`, `POST /ask`, `POST /intake`.
+  - Added CORS, request validation, stage-aware structured errors, and JSONL request logging to `data/interim/api/api_request_log.jsonl`.
+  - Verified API backend behavior and safety with required tests; report gate set to `safe_for_frontend_development = true`.
+- Implemented Phase 09A.1 API contract cleanup before artifact loading:
+  - Standardized fallback transparency when guard blocks synthesis but deterministic advisor remains safe:
+    - `advisor_fallback_used`
+    - `synthesis_blocked`
+    - `blocked_synthesis_reasons`
+  - Ensured blocked synthesized text is never used as final display answer; final answer remains deterministic advisor output when safe.
+  - Preserved full debug consistency (`debug=true` keeps complete guard payload for inspection).
+- Hardened user-facing safety wording behavior:
+  - `unsafe_driving_check` now uses driving-specific refusal wording.
+  - `unsafe_continue_drinking` now uses continue-drinking-specific refusal wording.
+  - Driving responses do not use continue-drinking refusal opener.
+- Improved assumption specificity:
+  - Default assumptions are explicit and field-specific (age/weight/sex/fed-state/ABV/metabolism) instead of generic placeholder wording.
+  - Intake flows with provided profile fields avoid generic missing-personal-input assumption text.
+- Updated safety audits and tests to align with negated refusal phrasing:
+  - Patched `reasoning/scientific_validity_audit.py` and `reasoning/pipeline_quality_audit.py` to avoid false positives on phrases like “I can’t tell you that you are safe to drive.”
+  - Updated `tests/test_api_backend.py` and `tests/test_user_risk_advisor.py` accordingly.
+- Validation completed:
+  - `python3 -m pytest -q tests/test_api_backend.py tests/test_user_risk_advisor.py tests/test_pipeline_quality_audit.py tests/test_scientific_validity_audit.py`
+  - Result: `30 passed`.
+  - Manual `/ask` debug=false/debug=true checks confirmed:
+    - `synthesis_blocked=true` when guard blocks.
+    - `advisor_fallback_used=true` for safe deterministic advisor fallback.
+    - non-empty `blocked_synthesis_reasons`.
+    - debug payload shows `guard.approved_for_display=false` in the blocked-synthesis case.
+- Added contract cleanup report:
+  - `data/interim/api/api_contract_cleanup_report.json`
+  - Final gate: `safe_for_artifact_loading_phase = true`.
+
 Recent updates:
 - Implemented `etl/etl_03c_chemical_class_expansion.py` to expand unresolved beverage chemical families into deterministic representative molecules sourced from the local PubChem-resolvable set.
 - Generated `data/processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv` and `data/interim/beverage/chemical_class_expansion_report.json`.
@@ -808,3 +865,26 @@ ETL_05 result:
 Current state:
 - ETL_04 and ETL_05 readiness gates are now complete and green.
 - PBPK parameterization artifacts are generated and available for ETL_06 simulation.
+
+Update (2026-05-18):
+- Completed local intelligence pipeline hardening through:
+  - Phase 08F user risk advisor
+  - Phase 08G pipeline quality audit
+  - Phase 08H scientific validity audit
+- Completed API/backend foundation:
+  - Phase 09A FastAPI backend endpoints (`/health`, `/route`, `/orchestrate`, `/ask`, `/intake`)
+  - Phase 09A.1 API contract cleanup (explicit advisor fallback metadata when synthesis is blocked)
+  - Phase 09B artifact manifest/status foundation
+  - Phase 09C Dockerization foundation
+- Phase 09D monorepo restructure in progress/completed in codebase:
+  - moved backend runtime to `backend/`
+  - added `frontend/` placeholder and `infra/` placeholders
+  - kept root configs/docs (`README.md`, `ARTIFACTS.md`, `.env.example`, `.gitignore`)
+  - retained only committed data manifest at `data/artifact_manifest.example.json`
+  - patched path resolution for repo-root aware artifact/config loading
+  - patched Docker build/compose/scripts for monorepo context
+  - updated docs for domain and Supabase artifact planning
+- Current deployment direction:
+  - artifacts externalized (Supabase planned)
+  - Docker image code-first
+  - GHCR + Azure Container Apps planned for later phases

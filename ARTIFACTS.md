@@ -1,59 +1,46 @@
 # Artifact Storage Policy
 
 ## In Git (Versioned)
-- Source code (`app_cli.py`, `reasoning/`, `simulation/`, `etl/`, `rag/`, `utils/`)
-- Tests (`tests/`)
-- Documentation and architecture notes (`docs/`, schema/design markdown/cypher files)
-- Small processed tables and lightweight JSONL assets used for reproducible local runs
-- Final validation and audit reports required for reproducibility and release gates
+- Source code under `backend/`
+- Tests under `backend/tests/`
+- Documentation under `docs/`
+- Lightweight manifest metadata (`data/artifact_manifest.example.json`)
+- Final lightweight validation/audit summaries required for reproducibility
 
 ## Outside Git (Artifact Storage)
-- Raw datasets (food composition, pathway corpora, PubChem source files)
-- Large scientific PDFs and paper dumps
+- Raw datasets
+- PDFs/research dumps
 - PubChem JSON/SDF bulk artifacts
-- Embedding parquet files and generated vector payloads
-- Weaviate vector database runtime contents
-- Neo4j runtime databases and transaction files
-- Model training/fine-tuning artifacts (e.g., LoRA checkpoints)
+- Embedding parquet/vector outputs
+- Weaviate runtime data
+- Neo4j runtime data
+- Model fine-tuning artifacts
+- Large logs/intermediate ETL outputs
 
-## Azure Artifact Layout
-Use one Blob container for non-Git artifacts:
+## Planned External Storage (Supabase)
+Bucket suggestion:
+- `alcohol-intelligence-artifacts`
 
-`alcohol-intelligence-artifacts/`
-
+Suggested layout:
 ```text
-raw/
-  food_composition/
-  pubchem/
-  human_metabolism_pdfs/
-  jecfa/
-
+releases/v0.1-local-intelligence/
 processed/
-  weaviate_jsonl/
-  embeddings_parquet/
-  pbpk_tables/
-  beverage_tables/
-
-model/
-  qwen_lora/
-  prompt_templates/
-
+embeddings/
+neo4j/
+weaviate/
 reports/
-  validation/
-  audits/
-
-releases/
-  v0.1-local-intelligence/
 ```
 
 ## Regeneration Commands
-Run from repo root:
+Run from repo root with `PYTHONPATH=backend`:
 
 ```bash
-python3 etl/etl_07b_weaviate_materialization.py
-python3 etl/etl_07c_embedding_generation.py
-python3 etl/etl_07d_weaviate_schema_init.py
-python3 etl/etl_07e_weaviate_ingestion.py
-python3 reasoning/pipeline_quality_audit.py --compact
-python3 reasoning/scientific_validity_audit.py
+PYTHONPATH=backend python3 backend/etl/etl_07b_weaviate_materialization.py
+PYTHONPATH=backend python3 backend/etl/etl_07c_embedding_generation.py
+PYTHONPATH=backend python3 backend/etl/etl_07d_weaviate_schema_init.py
+PYTHONPATH=backend python3 backend/etl/etl_07e_weaviate_ingestion.py
+PYTHONPATH=backend python3 backend/reasoning/pipeline_quality_audit.py --compact
+PYTHONPATH=backend python3 backend/reasoning/scientific_validity_audit.py
 ```
+
+Supabase upload/download integration is planned, not implemented in this phase.

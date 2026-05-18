@@ -37,6 +37,8 @@ data/interim/**/api_request_log.jsonl
 # Store these externally, e.g. Azure Blob Storage, or regenerate locally.
 # ============================================================
 data/**
+!data/
+!data/artifact_manifest.example.json
 
 # ============================================================
 # Raw archives / compressed dumps anywhere

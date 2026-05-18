@@ -1,0 +1,340 @@
+{
+  "manifest_version": "0.1",
+  "artifacts": [
+    {
+      "artifact_id": "core_master_beverage_reference_repaired",
+      "category": "core_processed_tables",
+      "local_path": "data/processed/beverage/reference_tables/master_beverage_reference_repaired.csv",
+      "required_for": ["pbpk", "graph", "reasoning"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Canonical beverage reference table."
+    },
+    {
+      "artifact_id": "core_beverage_compound_matrix_expanded",
+      "category": "core_processed_tables",
+      "local_path": "data/processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv",
+      "required_for": ["pbpk", "graph", "reasoning"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Expanded beverage-to-compound matrix."
+    },
+    {
+      "artifact_id": "core_human_metabolism_parameters",
+      "category": "core_processed_tables",
+      "local_path": "data/processed/human/human_metabolism_parameters.csv",
+      "required_for": ["pbpk", "graph", "reasoning"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Human metabolism parameter table."
+    },
+    {
+      "artifact_id": "core_pbpk_parameter_library",
+      "category": "core_processed_tables",
+      "local_path": "data/processed/pbpk/pbpk_parameter_library.csv",
+      "required_for": ["pbpk", "reasoning"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "PBPK model parameter library."
+    },
+    {
+      "artifact_id": "core_population_modifiers",
+      "category": "core_processed_tables",
+      "local_path": "data/processed/pbpk/population_modifiers.csv",
+      "required_for": ["pbpk", "reasoning"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Population-based PBPK modifiers."
+    },
+    {
+      "artifact_id": "core_beverage_effect_modifiers",
+      "category": "core_processed_tables",
+      "local_path": "data/processed/pbpk/beverage_effect_modifiers.csv",
+      "required_for": ["pbpk", "reasoning"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Beverage effect modifiers for PBPK."
+    },
+
+    {
+      "artifact_id": "weaviate_jsonl_beverage_knowledge",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/beverage_knowledge.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized beverage knowledge JSONL."
+    },
+    {
+      "artifact_id": "weaviate_jsonl_compound_knowledge",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/compound_knowledge.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized compound knowledge JSONL."
+    },
+    {
+      "artifact_id": "weaviate_jsonl_metabolism_knowledge",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/metabolism_knowledge.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized metabolism knowledge JSONL."
+    },
+    {
+      "artifact_id": "weaviate_jsonl_pbpk_knowledge",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/pbpk_knowledge.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized PBPK knowledge JSONL."
+    },
+    {
+      "artifact_id": "weaviate_jsonl_population_knowledge",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/population_knowledge.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized population knowledge JSONL."
+    },
+    {
+      "artifact_id": "weaviate_jsonl_scientific_evidence",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/scientific_evidence.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized scientific evidence JSONL."
+    },
+    {
+      "artifact_id": "weaviate_jsonl_toxicity_knowledge",
+      "category": "weaviate_materialized_jsonl",
+      "local_path": "data/processed/weaviate/toxicity_knowledge.jsonl",
+      "required_for": ["weaviate_materialization"],
+      "required": true,
+      "expected_type": "jsonl",
+      "min_size_bytes": 16,
+      "description": "Materialized toxicity knowledge JSONL."
+    },
+
+    {
+      "artifact_id": "weaviate_emb_beverage",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/beverage_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "Beverage embedding vectors in parquet."
+    },
+    {
+      "artifact_id": "weaviate_emb_compound",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/compound_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "Compound embedding vectors in parquet."
+    },
+    {
+      "artifact_id": "weaviate_emb_metabolism",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/metabolism_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "Metabolism embedding vectors in parquet."
+    },
+    {
+      "artifact_id": "weaviate_emb_pbpk",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/pbpk_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "PBPK embedding vectors in parquet."
+    },
+    {
+      "artifact_id": "weaviate_emb_population",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/population_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "Population embedding vectors in parquet."
+    },
+    {
+      "artifact_id": "weaviate_emb_scientific_evidence",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/scientific_evidence_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "Scientific evidence embedding vectors in parquet."
+    },
+    {
+      "artifact_id": "weaviate_emb_toxicity",
+      "category": "weaviate_embeddings",
+      "local_path": "data/processed/weaviate/embedded/toxicity_embeddings.parquet",
+      "required_for": ["weaviate_ingestion"],
+      "required": true,
+      "expected_type": "parquet",
+      "min_size_bytes": 64,
+      "description": "Toxicity embedding vectors in parquet."
+    },
+
+    {
+      "artifact_id": "neo4j_init_master_beverage_reference_repaired",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "data/processed/beverage/reference_tables/master_beverage_reference_repaired.csv",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Neo4j rebuild input: beverage reference."
+    },
+    {
+      "artifact_id": "neo4j_init_beverage_compound_matrix_expanded",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "data/processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Neo4j rebuild input: beverage compound matrix."
+    },
+    {
+      "artifact_id": "neo4j_init_human_metabolism_parameters",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "data/processed/human/human_metabolism_parameters.csv",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Neo4j rebuild input: human metabolism parameters."
+    },
+    {
+      "artifact_id": "neo4j_init_pbpk_parameter_library",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "data/processed/pbpk/pbpk_parameter_library.csv",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Neo4j rebuild input: PBPK parameter library."
+    },
+    {
+      "artifact_id": "neo4j_init_population_modifiers",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "data/processed/pbpk/population_modifiers.csv",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Neo4j rebuild input: population modifiers."
+    },
+    {
+      "artifact_id": "neo4j_init_beverage_effect_modifiers",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "data/processed/pbpk/beverage_effect_modifiers.csv",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "csv",
+      "min_size_bytes": 32,
+      "description": "Neo4j rebuild input: beverage effect modifiers."
+    },
+    {
+      "artifact_id": "neo4j_graph_schema_design",
+      "category": "neo4j_initialization_inputs",
+      "local_path": "rag/neo4j/neo4j_graph_schema_design.md",
+      "required_for": ["neo4j_rebuild"],
+      "required": true,
+      "expected_type": "md",
+      "min_size_bytes": 32,
+      "description": "Neo4j schema/design input."
+    },
+
+    {
+      "artifact_id": "weaviate_schema_design",
+      "category": "weaviate_schema_design_inputs",
+      "local_path": "rag/weaviate/weaviate_schema_design.md",
+      "required_for": ["weaviate_schema_init"],
+      "required": true,
+      "expected_type": "md",
+      "min_size_bytes": 32,
+      "description": "Weaviate schema/design input."
+    },
+
+    {
+      "artifact_id": "report_scientific_validity_audit",
+      "category": "validation_reports",
+      "local_path": "data/interim/reasoning/scientific_validity_audit_report.json",
+      "required_for": ["deployment_readiness"],
+      "required": true,
+      "expected_type": "json",
+      "min_size_bytes": 16,
+      "description": "Scientific validity audit report."
+    },
+    {
+      "artifact_id": "report_pipeline_quality_audit",
+      "category": "validation_reports",
+      "local_path": "data/interim/reasoning/pipeline_quality_audit_report.json",
+      "required_for": ["deployment_readiness"],
+      "required": true,
+      "expected_type": "json",
+      "min_size_bytes": 16,
+      "description": "Pipeline quality audit report."
+    },
+    {
+      "artifact_id": "report_weaviate_semantic_retrieval",
+      "category": "validation_reports",
+      "local_path": "data/interim/weaviate/semantic_retrieval_test_report.json",
+      "required_for": ["deployment_readiness"],
+      "required": true,
+      "expected_type": "json",
+      "min_size_bytes": 16,
+      "description": "Weaviate semantic retrieval validation report."
+    },
+    {
+      "artifact_id": "report_neo4j_graph_validation",
+      "category": "validation_reports",
+      "local_path": "data/interim/neo4j/neo4j_graph_validation_report.json",
+      "required_for": ["deployment_readiness"],
+      "required": true,
+      "expected_type": "json",
+      "min_size_bytes": 16,
+      "description": "Neo4j graph validation report."
+    },
+    {
+      "artifact_id": "report_pbpk_calibration",
+      "category": "validation_reports",
+      "local_path": "data/interim/pbpk/pbpk_calibration_report.json",
+      "required_for": ["deployment_readiness"],
+      "required": true,
+      "expected_type": "json",
+      "min_size_bytes": 16,
+      "description": "PBPK calibration report."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+pandas
+numpy
+scipy
+neo4j
+weaviate-client
+pyarrow
+pypdf
+pytest
+httpx

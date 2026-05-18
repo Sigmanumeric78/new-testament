@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: alcohol-intelligence-api-local
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      PYTHONPATH: /app/backend
+      NEO4J_URI: bolt://host.docker.internal:7687
+      WEAVIATE_URL: http://host.docker.internal:8080
+      WEAVIATE_GRPC_HOST: host.docker.internal
+      WEAVIATE_GRPC_PORT: "50051"
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

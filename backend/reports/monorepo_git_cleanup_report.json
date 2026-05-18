@@ -1,0 +1,22 @@
+{
+  "old_root_backend_paths_absent": true,
+  "cache_removed": true,
+  "data_not_staged": true,
+  "only_manifest_data_allowed": true,
+  "docker_compose_config_pass": true,
+  "backend_imports_pass": true,
+  "required_tests_pass": true,
+  "safe_to_commit_monorepo": true,
+  "notes": {
+    "required_test_command": "PYTHONPATH=backend python3 -m pytest -q backend/tests/test_api_backend.py backend/tests/test_docker_config.py backend/tests/test_artifact_manager.py",
+    "required_test_result": "27 passed",
+    "docker_compose_config_command": "docker compose -f backend/docker-compose.local.yml config",
+    "docker_compose_warning": "compose file uses obsolete version field; command still succeeded",
+    "import_check": "imports_ok",
+    "staged_data_paths": [],
+    "untracked_data_paths": [
+      "data/artifact_manifest.example.json"
+    ],
+    "staged_old_root_backend_paths": []
+  }
+}

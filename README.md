@@ -1,64 +1,67 @@
-# Alcohol Intelligence Local V1
+# Alcohol Intelligence Monorepo
 
-A local alcohol-risk reasoning system that combines simulation, causal knowledge, semantic retrieval, grounded synthesis, and safety guarding to provide conservative end-user guidance.
+Local-first alcohol risk estimation and safety guidance system with deterministic guards.
 
 ## Safety Disclaimer
-- Estimates only; outputs are uncertainty-aware approximations.
+- Estimates only.
 - Not medical advice.
-- Not legal or driving advice.
+- Not legal/driving advice.
 - Never use this system to decide whether it is safe to drive.
 
-## What The System Does
-- Parses natural-language alcohol questions.
-- Routes queries to the required reasoning modules.
-- Runs deterministic PBPK-style alcohol simulations when appropriate.
-- Uses graph/retrieval evidence to support mechanistic and toxicity context.
-- Produces plain-language risk guidance with conservative safety constraints.
-- Blocks unsafe or unsupported responses before display.
+## Monorepo Layout
+- `backend/`: FastAPI backend, reasoning pipeline, simulation, RAG integration, scripts, tests, Docker config.
+- `frontend/`: Placeholder for future React app.
+- `infra/`: Placeholder docs for Docker/CI/CD/Azure/DNS setup.
+- `docs/`: Architecture, memory, deployment planning.
+- `data/artifact_manifest.example.json`: committed lightweight artifact manifest only.
 
-## Architecture Summary
-- PBPK simulator: `simulation/pbpk/pbpk_master_simulator.py`
-- Neo4j causal graph reasoning
+## Backend Architecture
+- PBPK simulator: `backend/simulation/pbpk/pbpk_master_simulator.py`
+- Neo4j causal graph integration
 - Weaviate semantic retrieval
-- Qwen2.5 3B via Ollama (grounded synthesis layer)
-- User risk advisor: plain-language conservative guidance
-- Grounding/safety guard: deterministic validation before display
+- Qwen2.5 3B via Ollama (grounded synthesis)
+- Grounding/safety guard before user display
+- User risk advisor for plain-language conservative guidance
 
-## Local Services Required
+## Local Services
 - Neo4j
-- Weaviate (Docker/local)
+- Weaviate
 - Ollama with `qwen2.5:3b`
 
-## Local Setup
-1. Create environment file:
+## Setup
+1. Copy env file:
    - `cp .env.example .env`
-2. Install Python dependencies in your environment (example):
-   - `pip install -U pandas scipy neo4j weaviate-client pytest`
-3. Start Weaviate (local Docker or equivalent service).
-4. Start Neo4j and confirm DB credentials match `.env`.
-5. Verify Ollama model:
+2. Install backend dependencies:
+   - `pip install -r backend/requirements.txt`
+3. Start Neo4j and Weaviate locally.
+4. Ensure Ollama is running:
    - `ollama pull qwen2.5:3b`
-   - `ollama list`
 
-## CLI Commands
-- Health check:
-  - `python3 app_cli.py --health`
-- Demo run:
-  - `python3 app_cli.py --demo`
-- Single query pretty output:
-  - `python3 app_cli.py --query "I am 75 kg male, fed, I drank 200 ml vodka in 1 hour, should I keep drinking?" --pretty`
-- Guided intake mode:
-  - `python3 app_cli.py --intake`
+## Run Backend API
+```bash
+cd backend
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-## Testing and Audits
-- Full tests:
-  - `pytest -q`
-- Pipeline quality audit:
-  - `python3 reasoning/pipeline_quality_audit.py --compact`
-- Scientific validity/truthfulness audit:
-  - `python3 reasoning/scientific_validity_audit.py`
+## Run Backend Tests
+```bash
+PYTHONPATH=backend python3 -m pytest -q backend/tests
+```
+
+## Docker (Local)
+```bash
+docker compose -f backend/docker-compose.local.yml up --build
+```
+
+## Useful Commands
+```bash
+PYTHONPATH=backend python3 backend/app_cli.py --health
+PYTHONPATH=backend python3 backend/app_cli.py --demo
+PYTHONPATH=backend python3 backend/app_cli.py --query "I am 75 kg male, fed, I drank 200 ml vodka in 1 hour, should I keep drinking?" --pretty
+PYTHONPATH=backend python3 backend/app_cli.py --intake
+```
 
 ## Artifact Policy
-- GitHub stores code, tests, docs, and lightweight reproducible artifacts.
-- Azure Blob stores raw/large/generated artifacts (datasets, PDFs, embeddings, runtime DB artifacts, model artifacts).
-- See `ARTIFACTS.md` for the Azure container layout and regeneration commands.
+- GitHub stores code, tests, docs, and lightweight reproducible metadata.
+- Large/raw/generated artifacts stay outside Git (planned Supabase Storage workflow).
+- See `ARTIFACTS.md` and `docs/supabase_artifact_plan.md`.
