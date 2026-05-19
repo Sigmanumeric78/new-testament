@@ -108,3 +108,11 @@ frontend/dist/
 !README.md
 !backend/rag/neo4j/neo4j_graph_schema_design.md
 !backend/rag/weaviate/weaviate_schema_design.md
+
+# Backend generated runtime/data artifacts
+backend/data/interim/
+backend/data/processed/
+backend/data/raw/
+backend/data/releases/
+backend/data/exports/
+backend/data/chunks/
