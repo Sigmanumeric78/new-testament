@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 from artifacts.artifact_manager import check_all_artifacts, load_manifest, write_local_manifest
 from artifacts.local_store import get_project_root, resolve_path, sha256 as compute_sha256, size_bytes as compute_size_bytes
+
+DEFAULT_SUPABASE_MAX_UPLOAD_MB = 45
 
 
 def _clean_text(value: Any) -> str:
@@ -28,6 +31,111 @@ def build_remote_path(release_name: str, local_path: str) -> str:
     normalized_release = _clean_text(release_name).strip("/")
     normalized_local = local_path.replace("\\", "/").lstrip("/")
     return f"releases/{normalized_release}/{normalized_local}"
+
+
+def get_max_upload_bytes(max_upload_mb: float | None = None) -> int:
+    if max_upload_mb is None:
+        raw = _clean_text(os.getenv("SUPABASE_MAX_UPLOAD_MB", ""))
+        if raw:
+            try:
+                parsed = float(raw)
+            except ValueError:
+                parsed = float(DEFAULT_SUPABASE_MAX_UPLOAD_MB)
+        else:
+            parsed = float(DEFAULT_SUPABASE_MAX_UPLOAD_MB)
+    else:
+        parsed = float(max_upload_mb)
+
+    if parsed <= 0:
+        parsed = float(DEFAULT_SUPABASE_MAX_UPLOAD_MB)
+    return int(parsed * 1024 * 1024)
+
+
+def _to_repo_relative(path: Path) -> str:
+    root = get_project_root()
+    normalized = path.as_posix()
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return normalized.lstrip("/")
+
+
+def chunk_artifact_for_release(
+    *,
+    release_name: str,
+    local_path: str,
+    original_size_bytes: int,
+    original_sha256: str,
+    chunk_size_bytes: int,
+) -> Dict[str, Any]:
+    source_path = resolve_path(local_path)
+    if not source_path.exists() or not source_path.is_file():
+        raise FileNotFoundError(f"Cannot chunk missing artifact: {local_path}")
+
+    relative_original = _to_repo_relative(source_path)
+    chunk_dir = get_project_root() / "data" / "chunks" / release_name / relative_original
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+
+    # Ensure deterministic chunk directory contents across reruns.
+    for stale in chunk_dir.glob("part_*"):
+        if stale.is_file():
+            stale.unlink()
+    stale_manifest = chunk_dir / "chunk_manifest.json"
+    if stale_manifest.exists():
+        stale_manifest.unlink()
+
+    chunks: List[Dict[str, Any]] = []
+    with source_path.open("rb") as handle:
+        part_index = 0
+        while True:
+            payload = handle.read(chunk_size_bytes)
+            if not payload:
+                break
+            part_name = f"part_{part_index:05d}"
+            part_path = chunk_dir / part_name
+            part_path.write_bytes(payload)
+            part_sha = _file_sha256(part_path)
+            remote_path = build_remote_path(
+                release_name,
+                f"chunks/{relative_original}/{part_name}",
+            )
+            chunks.append(
+                {
+                    "part_name": part_name,
+                    "size_bytes": int(len(payload)),
+                    "sha256": part_sha,
+                    "remote_path": remote_path,
+                    "local_path": _to_repo_relative(part_path),
+                }
+            )
+            part_index += 1
+
+    chunk_manifest = {
+        "original_path": local_path,
+        "original_size_bytes": int(original_size_bytes),
+        "original_sha256": original_sha256,
+        "chunk_size_bytes": int(chunk_size_bytes),
+        "chunk_count": len(chunks),
+        "chunks": chunks,
+        "restore_command_hint": (
+            f"PYTHONPATH=backend python3 backend/scripts/artifact_download_supabase.py "
+            f"--release {release_name} --execute"
+        ),
+    }
+
+    chunk_manifest_path = chunk_dir / "chunk_manifest.json"
+    chunk_manifest_path.write_text(json.dumps(chunk_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    chunk_manifest_remote_path = build_remote_path(
+        release_name,
+        f"chunks/{relative_original}/chunk_manifest.json",
+    )
+
+    return {
+        "chunk_manifest_path": _to_repo_relative(chunk_manifest_path),
+        "chunk_manifest_remote_path": chunk_manifest_remote_path,
+        "chunk_count": len(chunks),
+        "chunks": chunks,
+    }
 
 
 def _load_manifest_items(manifest_path: Path) -> List[Dict[str, Any]]:
@@ -67,13 +175,16 @@ def build_release_bundle(
     manifest_path: Path,
     output_dir: Path,
     allow_missing: bool = False,
+    max_upload_mb: float | None = None,
     generated_at_utc: str | None = None,
 ) -> Dict[str, Any]:
     items = _load_manifest_items(manifest_path)
     artifacts: List[Dict[str, Any]] = []
+    max_upload_size_bytes = get_max_upload_bytes(max_upload_mb)
 
     required_count = 0
     available_required_count = 0
+    chunked_artifact_count = 0
 
     for raw in items:
         artifact_id = _clean_text(raw.get("artifact_id"))
@@ -107,20 +218,43 @@ def build_release_bundle(
             if available:
                 available_required_count += 1
 
-        artifacts.append(
-            {
-                "artifact_id": artifact_id,
-                "category": category,
-                "local_path": local_path,
-                "remote_path": build_remote_path(release_name, local_path),
-                "size_bytes": artifact_size,
-                "sha256": artifact_sha,
-                "required": required,
-                "required_for": required_for,
-                "available": available,
-                "validation_status": validation_status,
-            }
-        )
+        artifact_record: Dict[str, Any] = {
+            "artifact_id": artifact_id,
+            "category": category,
+            "local_path": local_path,
+            "remote_path": build_remote_path(release_name, local_path),
+            "size_bytes": artifact_size,
+            "sha256": artifact_sha,
+            "required": required,
+            "required_for": required_for,
+            "available": available,
+            "validation_status": validation_status,
+            "upload_strategy": "direct",
+            "direct_upload": True,
+        }
+
+        if available and artifact_size > max_upload_size_bytes:
+            chunk_details = chunk_artifact_for_release(
+                release_name=release_name,
+                local_path=local_path,
+                original_size_bytes=artifact_size,
+                original_sha256=artifact_sha,
+                chunk_size_bytes=max_upload_size_bytes,
+            )
+            artifact_record.update(
+                {
+                    "upload_strategy": "chunked",
+                    "direct_upload": False,
+                    "chunk_manifest_path": chunk_details["chunk_manifest_path"],
+                    "chunk_manifest_remote_path": chunk_details["chunk_manifest_remote_path"],
+                    "chunk_count": int(chunk_details["chunk_count"]),
+                    "original_sha256": artifact_sha,
+                    "original_size_bytes": int(artifact_size),
+                }
+            )
+            chunked_artifact_count += 1
+
+        artifacts.append(artifact_record)
 
     missing_required = [item for item in artifacts if item["required"] and not item["available"]]
     if missing_required and not allow_missing:
@@ -136,10 +270,12 @@ def build_release_bundle(
     release_payload = {
         "release_name": release_name,
         "generated_at_utc": generated,
+        "max_upload_size_bytes": int(max_upload_size_bytes),
         "artifact_count": artifact_count,
         "required_artifact_count": required_count,
         "available_artifact_count": available_count,
         "missing_artifact_count": missing_count,
+        "chunked_artifact_count": int(chunked_artifact_count),
         "artifacts": artifacts,
     }
 
@@ -157,6 +293,8 @@ def build_release_bundle(
                 "required_artifact_count": required_count,
                 "available_artifact_count": available_count,
                 "missing_artifact_count": missing_count,
+                "chunked_artifact_count": int(chunked_artifact_count),
+                "max_upload_size_bytes": int(max_upload_size_bytes),
             },
             indent=2,
             sort_keys=True,

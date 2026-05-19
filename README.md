@@ -126,3 +126,4 @@ PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py --release 
 ```
 
 Use `--execute` only when you intentionally want live Supabase uploads/downloads.
+Oversized artifacts are auto-chunked using `SUPABASE_MAX_UPLOAD_MB` (default `45`), and reassembled on download with SHA256 verification.

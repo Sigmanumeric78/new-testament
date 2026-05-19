@@ -1,4 +1,15 @@
 Latest updates:
+- Fixed Supabase oversized artifact upload handling (Phase 09E hardening):
+  - Added deterministic chunking for artifacts larger than `SUPABASE_MAX_UPLOAD_MB` (default `45` MB).
+  - Oversized artifacts now upload as `releases/<release>/chunks/.../part_00000...` plus `chunk_manifest.json`; direct upload is skipped.
+  - Updated release manifest metadata with `upload_strategy`, `chunk_manifest_path`, `chunk_manifest_remote_path`, `chunk_count`, and original file hash/size.
+  - Added chunk-aware download restore and verification logic with SHA256 checks.
+  - Hardened forbidden upload guardrails and updated docs (`README.md`, `ARTIFACTS.md`, `docs/supabase_artifact_plan.md`).
+  - Validation:
+    - `PYTHONPATH=backend python3 -m pytest -q backend/tests/test_supabase_artifact_foundation.py backend/tests/test_artifact_manager.py` → `23 passed`.
+    - Dry-run upload shows chunk replacement for `weaviate_emb_scientific_evidence` and no direct upload of the oversized parquet.
+    - Live upload with `--execute --overwrite` succeeded after patch; chunk manifest + parts uploaded for the oversized artifact.
+
 - Implemented Phase 09C Dockerization Foundation (code-first backend containerization):
   - Added `Dockerfile` (Python 3.11 slim, `/app` workdir, `uvicorn api.main:app` default command).
   - Added `.dockerignore` to exclude secrets, raw data, embeddings parquet, runtime DB dirs, and large binary artifacts from image context.

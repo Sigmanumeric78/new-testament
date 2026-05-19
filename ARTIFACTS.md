@@ -64,6 +64,12 @@ Upload (execute):
 PYTHONPATH=backend python3 backend/scripts/artifact_upload_supabase.py --release v0.1-local-intelligence --execute
 ```
 
+Re-run upload safely after partial success:
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/artifact_upload_supabase.py --release v0.1-local-intelligence --execute --overwrite
+```
+
 Download (dry-run by default):
 
 ```bash
@@ -78,3 +84,4 @@ PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py --release 
 
 Security note:
 - Never print or commit `SUPABASE_SERVICE_ROLE_KEY`.
+- Oversized files are chunked automatically (`SUPABASE_MAX_UPLOAD_MB`, default 45 MB) and restored on download with checksum checks.

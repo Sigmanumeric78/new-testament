@@ -39,6 +39,10 @@ data/interim/**/api_request_log.jsonl
 data/**
 !data/
 !data/artifact_manifest.example.json
+# Explicit generated artifact subpaths (still covered by data/** above)
+data/chunks/
+data/releases/
+data/exports/
 
 # ============================================================
 # Raw archives / compressed dumps anywhere

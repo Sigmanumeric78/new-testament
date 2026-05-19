@@ -42,6 +42,10 @@ def _sha256_file(path: Path) -> str:
     return hasher.hexdigest()
 
 
+def _load_chunk_manifest(path: Path) -> Dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]:
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     artifacts = list(payload.get("artifacts", []) or [])
@@ -50,6 +54,7 @@ def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]
     checksum_mismatches: List[str] = []
     valid_count = 0
     invalid_count = 0
+    restorable_chunked: List[str] = []
 
     required_invalid = False
 
@@ -62,12 +67,82 @@ def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]
         expected_sha = _clean_text(artifact.get("sha256"))
         required = bool(artifact.get("required", True))
         available = bool(artifact.get("available", False))
+        upload_strategy = _clean_text(artifact.get("upload_strategy")) or "direct"
 
         if not available:
             if required:
                 missing.append(artifact_id)
                 required_invalid = True
                 invalid_count += 1
+            continue
+
+        if upload_strategy == "chunked":
+            expected_original_sha = _clean_text(artifact.get("original_sha256")) or expected_sha
+            original_local_path = resolve_path(local_path_raw)
+            if original_local_path.exists():
+                observed_original_sha = _sha256_file(original_local_path)
+                if expected_original_sha and observed_original_sha != expected_original_sha:
+                    checksum_mismatches.append(artifact_id)
+                    invalid_count += 1
+                    if required:
+                        required_invalid = True
+                else:
+                    valid_count += 1
+                continue
+
+            chunk_manifest_path_raw = _clean_text(artifact.get("chunk_manifest_path"))
+            if not chunk_manifest_path_raw:
+                missing.append(f"{artifact_id}:chunk_manifest")
+                invalid_count += 1
+                if required:
+                    required_invalid = True
+                continue
+            chunk_manifest_path = resolve_path(chunk_manifest_path_raw)
+            if not chunk_manifest_path.exists():
+                missing.append(f"{artifact_id}:chunk_manifest")
+                invalid_count += 1
+                if required:
+                    required_invalid = True
+                continue
+
+            try:
+                chunk_manifest = _load_chunk_manifest(chunk_manifest_path)
+                chunk_entries = list(chunk_manifest.get("chunks", []) or [])
+                if not chunk_entries:
+                    raise ValueError("chunk manifest has no chunks")
+                chunk_invalid = False
+                for idx, chunk in enumerate(chunk_entries):
+                    if not isinstance(chunk, dict):
+                        missing.append(f"{artifact_id}:chunk_{idx}:invalid")
+                        chunk_invalid = True
+                        continue
+                    part_name = _clean_text(chunk.get("part_name")) or f"part_{idx:05d}"
+                    part_local_path_raw = _clean_text(chunk.get("local_path"))
+                    if not part_local_path_raw:
+                        part_local_path_raw = (chunk_manifest_path.parent / part_name).as_posix()
+                    part_local_path = resolve_path(part_local_path_raw)
+                    if not part_local_path.exists():
+                        missing.append(f"{artifact_id}:{part_name}")
+                        chunk_invalid = True
+                        continue
+                    expected_part_sha = _clean_text(chunk.get("sha256"))
+                    observed_part_sha = _sha256_file(part_local_path)
+                    if expected_part_sha and observed_part_sha != expected_part_sha:
+                        checksum_mismatches.append(f"{artifact_id}:{part_name}")
+                        chunk_invalid = True
+
+                if chunk_invalid:
+                    invalid_count += 1
+                    if required:
+                        required_invalid = True
+                else:
+                    valid_count += 1
+                    restorable_chunked.append(artifact_id)
+            except Exception:
+                missing.append(f"{artifact_id}:chunk_manifest_unreadable")
+                invalid_count += 1
+                if required:
+                    required_invalid = True
             continue
 
         local_path = resolve_path(local_path_raw)
@@ -94,6 +169,7 @@ def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]
         "checksum_mismatches": sorted(set(checksum_mismatches)),
         "valid_count": int(valid_count),
         "invalid_count": int(invalid_count),
+        "restorable_chunked": sorted(set(restorable_chunked)),
     }
 
 

@@ -51,8 +51,16 @@ class SupabaseArtifactStore:
             "frontend/node_modules/",
             "frontend/dist/",
             "docs/research_papers/",
+            "data/interim/",
+            "__pycache__/",
         )
-        if normalized == ".env" or normalized.endswith("/.env") or normalized.endswith("/.env.local"):
+        forbidden_suffixes = (".pyc",)
+        if (
+            normalized == ".env"
+            or normalized.endswith("/.env")
+            or normalized.endswith("/.env.local")
+            or normalized.endswith(forbidden_suffixes)
+        ):
             return True
         return any(normalized.startswith(prefix) for prefix in forbidden_prefixes)
 
@@ -95,7 +103,7 @@ class SupabaseArtifactStore:
         storage = client.storage.from_(self.bucket)
 
         payload = source.read_bytes()
-        options = {"upsert": bool(overwrite)}
+        options = {"upsert": "true" if overwrite else "false"}
 
         try:
             result = storage.upload(remote_path.strip("/"), payload, file_options=options)
@@ -134,7 +142,7 @@ class SupabaseArtifactStore:
 
         client = self._get_client()
         storage = client.storage.from_(self.bucket)
-        options = {"upsert": bool(overwrite), "content-type": "application/json"}
+        options = {"upsert": "true" if overwrite else "false", "content-type": "application/json"}
         try:
             result = storage.upload(remote_path.strip("/"), serialized, file_options=options)
         except TypeError:

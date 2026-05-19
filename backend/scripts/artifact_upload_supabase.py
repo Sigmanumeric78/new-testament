@@ -13,11 +13,16 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() else BACKEND_ROOT
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from artifacts.release_manifest import default_release_dir  # noqa: E402
+from artifacts.local_store import resolve_path  # noqa: E402
+from artifacts.release_manifest import (  # noqa: E402
+    build_remote_path,
+    chunk_artifact_for_release,
+    default_release_dir,
+    get_max_upload_bytes,
+)
 from artifacts.supabase_store import SupabaseArtifactStore  # noqa: E402
 
 
@@ -40,8 +45,16 @@ def _is_forbidden_upload_path(local_path: str) -> bool:
         "frontend/node_modules/",
         "frontend/dist/",
         "docs/research_papers/",
+        "data/interim/",
+        "__pycache__/",
     )
-    if normalized == ".env" or normalized.endswith("/.env") or normalized.endswith("/.env.local"):
+    forbidden_suffixes = (".pyc",)
+    if (
+        normalized == ".env"
+        or normalized.endswith("/.env")
+        or normalized.endswith("/.env.local")
+        or normalized.endswith(forbidden_suffixes)
+    ):
         return True
     return any(normalized.startswith(prefix) for prefix in forbidden_prefixes)
 
@@ -58,11 +71,16 @@ def load_release_manifest(release: str, release_dir: Path | None = None) -> Dict
 
 def collect_upload_candidates(release_manifest: Dict[str, Any], release_dir: Path) -> Dict[str, Any]:
     artifacts = list(release_manifest.get("artifacts", []) or [])
+    release_name = _clean_text(release_manifest.get("release_name"))
+    max_upload_size_bytes = get_max_upload_bytes()
 
     required_missing: List[str] = []
     upload_items: List[Dict[str, str]] = []
     skipped_optional_missing: List[str] = []
     skipped_forbidden: List[str] = []
+    skipped_oversized_direct_upload: List[str] = []
+    chunked_originals: List[str] = []
+    chunked_upload_count = 0
 
     for artifact in artifacts:
         if not isinstance(artifact, dict):
@@ -73,6 +91,8 @@ def collect_upload_candidates(release_manifest: Dict[str, Any], release_dir: Pat
         artifact_id = _clean_text(artifact.get("artifact_id"))
         required = bool(artifact.get("required", True))
         available = bool(artifact.get("available", False))
+        upload_strategy = _clean_text(artifact.get("upload_strategy")) or "direct"
+        artifact_size = int(artifact.get("size_bytes", 0) or 0)
 
         if _is_forbidden_upload_path(local_path):
             skipped_forbidden.append(artifact_id or local_path)
@@ -83,6 +103,82 @@ def collect_upload_candidates(release_manifest: Dict[str, Any], release_dir: Pat
                 required_missing.append(artifact_id or local_path)
             else:
                 skipped_optional_missing.append(artifact_id or local_path)
+            continue
+
+        if upload_strategy != "chunked":
+            local_file = resolve_path(local_path)
+            if local_file.exists():
+                if artifact_size <= 0:
+                    artifact_size = int(local_file.stat().st_size)
+                if artifact_size > max_upload_size_bytes:
+                    chunk_details = chunk_artifact_for_release(
+                        release_name=release_name,
+                        local_path=local_path,
+                        original_size_bytes=artifact_size,
+                        original_sha256=_clean_text(artifact.get("sha256")),
+                        chunk_size_bytes=max_upload_size_bytes,
+                    )
+                    artifact["upload_strategy"] = "chunked"
+                    artifact["direct_upload"] = False
+                    artifact["chunk_manifest_path"] = chunk_details["chunk_manifest_path"]
+                    artifact["chunk_manifest_remote_path"] = chunk_details["chunk_manifest_remote_path"]
+                    artifact["chunk_count"] = int(chunk_details["chunk_count"])
+                    artifact["original_sha256"] = _clean_text(artifact.get("sha256"))
+                    artifact["original_size_bytes"] = int(artifact_size)
+                    upload_strategy = "chunked"
+
+        if upload_strategy == "chunked":
+            skipped_oversized_direct_upload.append(artifact_id or local_path)
+            chunked_originals.append(artifact_id or local_path)
+
+            chunk_manifest_path = _clean_text(artifact.get("chunk_manifest_path"))
+            chunk_manifest_remote = _clean_text(artifact.get("chunk_manifest_remote_path"))
+            if not chunk_manifest_remote:
+                chunk_manifest_remote = build_remote_path(release_name, f"chunks/{local_path}/chunk_manifest.json")
+
+            if not chunk_manifest_path or not Path(chunk_manifest_path).exists():
+                required_missing.append(f"{artifact_id or local_path}:chunk_manifest_missing")
+                continue
+
+            upload_items.append(
+                {
+                    "local_path": chunk_manifest_path,
+                    "remote_path": chunk_manifest_remote,
+                    "artifact_id": f"{artifact_id or local_path}:chunk_manifest",
+                }
+            )
+            chunked_upload_count += 1
+
+            chunk_payload = json.loads(Path(chunk_manifest_path).read_text(encoding="utf-8"))
+            chunk_entries = list(chunk_payload.get("chunks", []) or [])
+            if not chunk_entries:
+                required_missing.append(f"{artifact_id or local_path}:chunk_parts_missing")
+                continue
+            for idx, chunk in enumerate(chunk_entries):
+                if not isinstance(chunk, dict):
+                    required_missing.append(f"{artifact_id or local_path}:invalid_chunk_entry_{idx}")
+                    continue
+                part_name = _clean_text(chunk.get("part_name")) or f"part_{idx:05d}"
+                part_local_path = _clean_text(chunk.get("local_path"))
+                if not part_local_path:
+                    part_local_path = (Path(chunk_manifest_path).parent / part_name).as_posix()
+                part_remote_path = _clean_text(chunk.get("remote_path"))
+                if not part_remote_path:
+                    part_remote_path = build_remote_path(
+                        release_name,
+                        f"chunks/{local_path}/{part_name}",
+                    )
+                if not Path(part_local_path).exists():
+                    required_missing.append(f"{artifact_id or local_path}:{part_name}:missing")
+                    continue
+                upload_items.append(
+                    {
+                        "local_path": part_local_path,
+                        "remote_path": part_remote_path,
+                        "artifact_id": f"{artifact_id or local_path}:{part_name}",
+                    }
+                )
+                chunked_upload_count += 1
             continue
 
         upload_items.append({"local_path": local_path, "remote_path": remote_path, "artifact_id": artifact_id})
@@ -116,6 +212,9 @@ def collect_upload_candidates(release_manifest: Dict[str, Any], release_dir: Pat
         "upload_items": upload_items,
         "skipped_optional_missing": sorted(set(skipped_optional_missing)),
         "skipped_forbidden": sorted(set(skipped_forbidden)),
+        "skipped_oversized_direct_upload": sorted(set(skipped_oversized_direct_upload)),
+        "chunked_upload_count": int(chunked_upload_count),
+        "chunked_originals": sorted(set(chunked_originals)),
     }
 
 
@@ -149,6 +248,9 @@ def main() -> int:
             "required_missing": required_missing,
             "skipped_optional_missing": plan["skipped_optional_missing"],
             "skipped_forbidden": plan["skipped_forbidden"],
+            "skipped_oversized_direct_upload": plan["skipped_oversized_direct_upload"],
+            "chunked_upload_count": plan["chunked_upload_count"],
+            "chunked_originals": plan["chunked_originals"],
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 1
@@ -169,6 +271,9 @@ def main() -> int:
         "uploaded": uploaded,
         "skipped_optional_missing": plan["skipped_optional_missing"],
         "skipped_forbidden": plan["skipped_forbidden"],
+        "skipped_oversized_direct_upload": plan["skipped_oversized_direct_upload"],
+        "chunked_upload_count": plan["chunked_upload_count"],
+        "chunked_originals": plan["chunked_originals"],
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
