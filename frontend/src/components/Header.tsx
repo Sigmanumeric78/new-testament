@@ -28,9 +28,12 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-6 py-4 backdrop-blur">
       <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">SoberScope</h1>
-          <p className="text-sm text-slate-600">Alcohol risk estimation, explained clearly.</p>
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="Zer0 G0nd0g0l logo" className="h-[30px] w-[30px] shrink-0 object-contain" />
+          <div>
+            <h1 className="font-brand-anurati text-xl font-semibold tracking-tight text-slate-900">Zer0 G0nd0g0l</h1>
+            <p className="text-sm text-slate-600">Alcohol risk estimation, explained clearly.</p>
+          </div>
         </div>
 
         <nav className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">

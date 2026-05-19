@@ -1,9 +1,0 @@
-{
-  "neo4j_export_script_created": true,
-  "weaviate_export_script_created": true,
-  "combined_export_script_created": true,
-  "verify_script_created": true,
-  "docs_created": true,
-  "tests_passed": true,
-  "safe_for_runtime_artifact_export": true
-}

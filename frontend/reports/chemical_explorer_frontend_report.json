@@ -1,9 +1,0 @@
-{
-  "3d_viewer_complete": true,
-  "chemical_explorer_page_complete": true,
-  "explorer_search_filter_pass": true,
-  "fallback_rendering_pass": true,
-  "safe_for_local_product_retest": true,
-  "tests_passed": true,
-  "ui_upgrade_complete": true
-}

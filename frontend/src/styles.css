@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Anurati";
+  src:
+    local("Anurati"),
+    url("/fonts/Anurati-Regular.woff2") format("woff2"),
+    url("/fonts/Anurati-Regular.otf") format("opentype");
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
 }
@@ -9,6 +18,12 @@
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
   font-family: "IBM Plex Sans", "Inter", "Segoe UI", sans-serif;
+}
+
+.font-brand-anurati {
+  font-family: "Anurati", "IBM Plex Sans", "Inter", "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 * {

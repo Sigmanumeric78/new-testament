@@ -1,8 +1,0 @@
-{
-  "layman_clean_pass": true,
-  "response_style_mapping_pass": true,
-  "safe_for_docker_push_retest": true,
-  "scientific_rendering_pass": true,
-  "style_labels_user_friendly": true,
-  "tests_passed": true
-}

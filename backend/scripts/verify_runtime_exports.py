@@ -56,6 +56,22 @@ def _collect_file_entries(root: Path, relative_paths: Sequence[str]) -> List[Dic
     return entries
 
 
+def _read_manifest_status(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return "invalid_json"
+    if isinstance(payload, Mapping):
+        status = payload.get("status")
+        if isinstance(status, str):
+            text = status.strip().lower()
+            if text:
+                return text
+    return "missing_status"
+
+
 def verify_runtime_exports(release: str = DEFAULT_RELEASE, output_root: Optional[str] = None) -> Dict[str, Any]:
     export_root = runtime_export_root(release, output_root)
     export_root.mkdir(parents=True, exist_ok=True)
@@ -69,8 +85,14 @@ def verify_runtime_exports(release: str = DEFAULT_RELEASE, output_root: Optional
     file_entries = _collect_file_entries(export_root, all_expected_paths)
     missing = [entry["path"] for entry in file_entries if not entry["exists"]]
 
-    neo4j_export_ok = all((export_root / rel).exists() for rel in neo_paths)
-    weaviate_export_ok = all((export_root / rel).exists() for rel in weav_paths)
+    neo4j_files_exist = all((export_root / rel).exists() for rel in neo_paths)
+    weaviate_files_exist = all((export_root / rel).exists() for rel in weav_paths)
+
+    neo_manifest_status = _read_manifest_status(export_root / "neo4j" / "graph_export_manifest.json")
+    weav_manifest_status = _read_manifest_status(export_root / "weaviate" / "backup_manifest.json")
+
+    neo4j_export_ok = bool(neo4j_files_exist and neo_manifest_status == "ok")
+    weaviate_export_ok = bool(weaviate_files_exist and weav_manifest_status == "ok")
 
     runtime_manifest = {
         "release": release,
@@ -79,6 +101,8 @@ def verify_runtime_exports(release: str = DEFAULT_RELEASE, output_root: Optional
         "expected_files": {"neo4j": neo_paths, "weaviate": weav_paths},
         "files": file_entries,
         "missing_files": missing,
+        "neo4j_manifest_status": neo_manifest_status,
+        "weaviate_manifest_status": weav_manifest_status,
     }
     manifest_path = export_root / "artifact_manifest.runtime.json"
     manifest_path.write_text(json.dumps(runtime_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -96,6 +120,8 @@ def verify_runtime_exports(release: str = DEFAULT_RELEASE, output_root: Optional
         "neo4j_export_ok": bool(neo4j_export_ok),
         "weaviate_export_ok": bool(weaviate_export_ok),
         "checksums_written": bool(checksums_written),
+        "neo4j_manifest_status": neo_manifest_status,
+        "weaviate_manifest_status": weav_manifest_status,
         "safe_for_supabase_upload": bool(neo4j_export_ok and weaviate_export_ok and checksums_written),
     }
     return result

@@ -952,3 +952,120 @@ Safety/product constraints preserved:
 - No deployment changes.
 - No auth/MongoDB/Supabase execution added.
 - Read-only chemical endpoints; no graph/vector mutation.
+
+## 2026-05-19 — Phase 10C.4 + Runtime Export Hardening + Branding Update
+
+### Phase 10C.4 acceptance timeout / Ollama cold-start hardening
+- Patched `scripts/fullstack_acceptance_check.sh`:
+  - Added configurable timeouts:
+    - `HEALTH_TIMEOUT` default `10`
+    - `CURL_TIMEOUT` default `90`
+  - Replaced hardcoded 20s POST timeouts with `--max-time "$CURL_TIMEOUT"`.
+  - Added timeout diagnostics for curl timeout (`exit 28`):
+    - cold-start explanation
+    - `ollama run qwen2.5:3b 'ready'`
+    - rerun suggestion `CURL_TIMEOUT=120 ...`
+  - Added optional prewarm gate:
+    - `PREWARM_OLLAMA=true`
+    - attempts HTTP prewarm and CLI prewarm
+    - warns only; never hard-fails prewarm
+- Added static regression test:
+  - `backend/tests/test_fullstack_acceptance_script.py`
+- Updated docs:
+  - `README.md`
+  - `frontend/README.md`
+  - with recommended command:
+    - `PREWARM_OLLAMA=true CURL_TIMEOUT=120 ./scripts/fullstack_acceptance_check.sh`
+
+### Phase 10C.4 BAC threshold context + scientific output cleanup
+- Backend:
+  - Added threshold context fields to API/advisor contract:
+    - `legal_limit_reference_bac`
+    - `is_estimated_below_0_08`
+    - `estimated_total_volume_for_0_08_ml`
+    - `estimated_additional_volume_to_0_08_ml`
+    - `threshold_explanation`
+  - Implemented deterministic threshold estimation logic in `backend/reasoning/user_risk_advisor.py`:
+    - PBPK-anchored binary-search approximation over total volume
+    - Widmark-style fallback when PBPK anchor is unavailable
+    - rounded output for user-facing context
+  - Refined intent-specific wording:
+    - keep-drinking query: no generic “I can’t calculate...” opener
+    - extra-amount query: refusal preserved
+    - driving query: strict refusal preserved (no driving permission)
+  - Reduced scientific-mode repetition:
+    - concise scientific intro in `answer`
+    - details delegated to structured fields/cards
+  - Patched:
+    - `backend/api/schemas.py`
+    - `backend/api/routes.py`
+    - `backend/reasoning/scientific_validity_audit.py` (truthfulness checks aligned with new safe wording)
+- Frontend:
+  - Added threshold fields to `frontend/src/lib/types.ts`
+  - Added formatting/sanitization support in `frontend/src/lib/format.ts`
+  - Added “0.08% threshold context” section in `frontend/src/components/ResultPanel.tsx`
+  - Updated tests in `frontend/src/components/ResultPanel.test.tsx`
+- Reports:
+  - `backend/reports/bac_threshold_context_report.json`
+  - `frontend/reports/bac_threshold_context_frontend_report.json`
+- Validation:
+  - Backend targeted suite passed (`34 passed`)
+  - Frontend tests/build passed
+  - Gate outcome: `safe_for_fullstack_acceptance_rerun = true`
+
+### Phase 09G runtime data export foundation
+- Added runtime export scripts:
+  - `backend/scripts/export_neo4j_data.py`
+  - `backend/scripts/export_weaviate_data.py`
+  - `backend/scripts/export_runtime_artifacts.sh`
+  - `backend/scripts/verify_runtime_exports.py`
+- Added tests:
+  - `backend/tests/test_runtime_export_scripts.py`
+- Added docs:
+  - `docs/runtime_data_export_plan.md`
+- Added report:
+  - `backend/reports/runtime_data_export_foundation_report.json`
+- Default behavior is read-only and metadata-safe; no upload/deployment side effects.
+
+### Neo4j serialization + stricter runtime export verification fix
+- Fixed Neo4j export JSON serialization in `backend/scripts/export_neo4j_data.py`:
+  - recursive sanitizer for:
+    - primitive types
+    - nested dict/list/tuple/set
+    - Python datetime/date/time
+    - Neo4j temporal objects
+    - Neo4j Node/Relationship/Path
+    - unknown objects -> string fallback
+- Hardened `backend/scripts/verify_runtime_exports.py`:
+  - `neo4j_export_ok=true` only if Neo4j files exist **and** `neo4j/graph_export_manifest.json` has `status == "ok"`
+  - `weaviate_export_ok=true` only if Weaviate files exist **and** `weaviate/backup_manifest.json` has `status == "ok"`
+  - `safe_for_supabase_upload=true` only when both statuses are ok and checksums are written
+- Added tests for:
+  - sanitizer datetime-like and nested object handling
+  - manifest status gating behavior
+- Validation:
+  - `PYTHONPATH=backend python3 -m pytest -q backend/tests/test_runtime_export_scripts.py` -> passed (`11 passed`)
+  - `bash backend/scripts/export_runtime_artifacts.sh v0.6-chemical-explorer` now reports safe upload only when manifests are actually `ok`
+
+### Frontend branding update
+- Rebranded frontend product name:
+  - `SoberScope` -> `Zer0 G0nd0g0l`
+- Updated references in:
+  - `frontend/index.html` title
+  - `frontend/package.json` and `frontend/package-lock.json` names
+  - `README.md` and `frontend/README.md`
+  - header/sidebar UI copy and brand labels
+- Added Anurati font integration hook:
+  - `@font-face` + brand class in `frontend/src/styles.css`
+  - brand class applied to product title elements
+  - added `frontend/public/fonts/README.md` for expected local font files
+- Added favicon + logo assets usage:
+  - copied assets into `frontend/public/`:
+    - `favicon.ico`
+    - `logo.png`
+  - `frontend/index.html` now includes favicon link
+  - logo rendered beside brand name in header and sidebar
+  - then adjusted logo sizing to avoid clipping:
+    - switched to `object-contain`
+    - reduced dimensions by 10px each side from prior values
+- Final sidebar branding block was removed per UI request (`frontend/src/components/Sidebar.tsx`).

@@ -1,4 +1,4 @@
-# SoberScope Frontend
+# Zer0 G0nd0g0l Frontend
 
 React + TypeScript + Vite frontend for the Alcohol Intelligence backend.
 

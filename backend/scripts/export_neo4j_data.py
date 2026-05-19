@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Mapping, Optional
@@ -67,7 +67,8 @@ def expected_neo4j_files() -> List[str]:
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    safe_payload = _to_json_safe(dict(payload))
+    path.write_text(json.dumps(safe_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -78,8 +79,101 @@ def _write_text(path: Path, text: str) -> None:
 def _run_query(session: Any, query: str) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for record in session.run(query):
-        rows.append(dict(record))
+        rows.append(_to_json_safe(dict(record)))
     return rows
+
+
+def _to_json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, (datetime, date, time)):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+
+    if isinstance(value, Mapping):
+        return {str(k): _to_json_safe(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_to_json_safe(item) for item in value]
+
+    # Neo4j temporal types often expose iso_format() or isoformat().
+    iso_format = getattr(value, "iso_format", None)
+    if callable(iso_format):
+        try:
+            return iso_format()
+        except Exception:
+            pass
+
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return isoformat()
+        except Exception:
+            pass
+
+    # Neo4j Path-like
+    if hasattr(value, "nodes") and hasattr(value, "relationships"):
+        nodes = getattr(value, "nodes", [])
+        relationships = getattr(value, "relationships", [])
+        return {
+            "type": "Path",
+            "nodes": [_to_json_safe(node) for node in list(nodes)],
+            "relationships": [_to_json_safe(rel) for rel in list(relationships)],
+        }
+
+    # Neo4j Node-like
+    if hasattr(value, "labels") and hasattr(value, "items"):
+        node_props: Dict[str, Any] = {}
+        try:
+            node_props = {str(k): _to_json_safe(v) for k, v in dict(value.items()).items()}
+        except Exception:
+            node_props = {}
+        return {
+            "type": "Node",
+            "element_id": _clean_text(getattr(value, "element_id", "")) or None,
+            "labels": sorted([_clean_text(label) for label in list(getattr(value, "labels", [])) if _clean_text(label)]),
+            "properties": node_props,
+        }
+
+    # Neo4j Relationship-like
+    if hasattr(value, "start_node") and hasattr(value, "end_node"):
+        rel_props: Dict[str, Any] = {}
+        try:
+            rel_props = {str(k): _to_json_safe(v) for k, v in dict(value.items()).items()}
+        except Exception:
+            rel_props = {}
+        start_node = getattr(value, "start_node", None)
+        end_node = getattr(value, "end_node", None)
+        return {
+            "type": "Relationship",
+            "element_id": _clean_text(getattr(value, "element_id", "")) or None,
+            "relationship_type": _clean_text(getattr(value, "type", "")) or None,
+            "start_node_element_id": _clean_text(getattr(start_node, "element_id", "")) or None,
+            "end_node_element_id": _clean_text(getattr(end_node, "element_id", "")) or None,
+            "properties": rel_props,
+        }
+
+    # Neo4j Record/Data classes may expose .data()
+    data_method = getattr(value, "data", None)
+    if callable(data_method):
+        try:
+            return _to_json_safe(data_method())
+        except Exception:
+            pass
+
+    # Generic object fallback
+    if hasattr(value, "__dict__"):
+        try:
+            obj_vars = vars(value)
+            if obj_vars:
+                return _to_json_safe(obj_vars)
+        except Exception:
+            pass
+
+    return str(value)
 
 
 def _export_unavailable(target_dir: Path, release: str, reason: str) -> Dict[str, Any]:
@@ -104,7 +198,7 @@ def _export_unavailable(target_dir: Path, release: str, reason: str) -> Dict[str
     }
     _write_json(target_dir / "graph_export_manifest.json", manifest)
     _write_text(target_dir / "neo4j_dump_instructions.md", _neo4j_dump_instructions())
-    return manifest
+    return _to_json_safe(manifest)
 
 
 def _neo4j_dump_instructions() -> str:
@@ -150,7 +244,8 @@ def export_neo4j_data(release: str = DEFAULT_RELEASE, output_root: Optional[str]
                 "MATCH ()-[r]->() RETURN type(r) AS relationship_type, count(*) AS count ORDER BY relationship_type",
             )
 
-            totals = {
+            totals = _to_json_safe(
+                {
                 "total_nodes": _run_query(session, "MATCH (n) RETURN count(n) AS value")[0]["value"],
                 "total_relationships": _run_query(session, "MATCH ()-[r]->() RETURN count(r) AS value")[0]["value"],
                 "distinct_labels": _run_query(
@@ -159,7 +254,8 @@ def export_neo4j_data(release: str = DEFAULT_RELEASE, output_root: Optional[str]
                 "distinct_relationship_types": _run_query(
                     session, "MATCH ()-[r]->() RETURN count(DISTINCT type(r)) AS value"
                 )[0]["value"],
-            }
+                }
+            )
 
             schema_snapshot: Dict[str, Any] = {
                 "status": "ok",
@@ -207,7 +303,7 @@ def export_neo4j_data(release: str = DEFAULT_RELEASE, output_root: Optional[str]
                     "validation_queries_read_only": True,
                 },
             )
-            _write_json(target_dir / "schema_snapshot.json", schema_snapshot)
+            _write_json(target_dir / "schema_snapshot.json", _to_json_safe(schema_snapshot))
     except Exception as exc:
         return _export_unavailable(target_dir, release, f"neo4j export error: {exc}")
     finally:
@@ -227,7 +323,7 @@ def export_neo4j_data(release: str = DEFAULT_RELEASE, output_root: Optional[str]
         "files": expected_neo4j_files(),
     }
     _write_json(target_dir / "graph_export_manifest.json", manifest)
-    return manifest
+    return _to_json_safe(manifest)
 
 
 def _parse_args() -> argparse.Namespace:

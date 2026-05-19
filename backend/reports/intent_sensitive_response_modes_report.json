@@ -1,9 +1,0 @@
-{
-  "analysis_fields_added": true,
-  "continue_drinking_wording_fixed": true,
-  "driving_refusal_preserved": true,
-  "extra_amount_refusal_preserved": true,
-  "safe_for_local_fullstack_retest": true,
-  "scientific_mode_enhanced": true,
-  "tests_passed": true
-}

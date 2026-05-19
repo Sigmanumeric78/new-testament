@@ -12,6 +12,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from scripts.export_neo4j_data import (  # noqa: E402
     DEFAULT_RELEASE,
+    _to_json_safe,
     expected_neo4j_files,
     runtime_export_root as neo_runtime_export_root,
 )
@@ -69,6 +70,10 @@ def test_verify_generates_manifest_and_checksums_when_files_present(tmp_path: Pa
         file_path.parent.mkdir(parents=True, exist_ok=True)
         if file_path.suffix == ".md":
             file_path.write_text("# snapshot\n", encoding="utf-8")
+        elif rel == "neo4j/graph_export_manifest.json":
+            file_path.write_text(json.dumps({"status": "ok", "read_only": True}) + "\n", encoding="utf-8")
+        elif rel == "weaviate/backup_manifest.json":
+            file_path.write_text(json.dumps({"status": "ok", "read_only_by_default": True}) + "\n", encoding="utf-8")
         else:
             file_path.write_text(json.dumps({"ok": True}) + "\n", encoding="utf-8")
 
@@ -103,6 +108,80 @@ def test_verify_detects_missing_files(tmp_path: Path) -> None:
     manifest_path = tmp_path / release / "artifact_manifest.runtime.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert payload["missing_files"]
+
+
+def test_sanitizer_handles_datetime_like_object() -> None:
+    class FakeDateTime:
+        def iso_format(self) -> str:
+            return "2026-05-19T12:00:00+00:00"
+
+    safe = _to_json_safe({"dt": FakeDateTime()})
+    assert safe["dt"] == "2026-05-19T12:00:00+00:00"
+
+
+def test_sanitizer_handles_nested_structures() -> None:
+    class Weird:
+        def __str__(self) -> str:
+            return "weird-object"
+
+    payload = {
+        "a": [1, {"b": (2, 3)}, {4, 5}],
+        "c": Weird(),
+    }
+    safe = _to_json_safe(payload)
+    assert safe["a"][0] == 1
+    assert safe["a"][1]["b"] == [2, 3]
+    assert sorted(safe["a"][2]) == [4, 5]
+    assert safe["c"] == "weird-object"
+
+
+def test_verify_uses_manifest_status_for_neo4j_and_weaviate(tmp_path: Path) -> None:
+    release = "status-check"
+    runtime_root = tmp_path / release
+    (runtime_root / "neo4j").mkdir(parents=True, exist_ok=True)
+    (runtime_root / "weaviate").mkdir(parents=True, exist_ok=True)
+
+    for rel in expected_runtime_files()["neo4j"] + expected_runtime_files()["weaviate"]:
+        file_path = runtime_root / rel
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        if file_path.suffix == ".md":
+            file_path.write_text("# snapshot\n", encoding="utf-8")
+        elif rel == "neo4j/graph_export_manifest.json":
+            file_path.write_text(json.dumps({"status": "unavailable"}) + "\n", encoding="utf-8")
+        elif rel == "weaviate/backup_manifest.json":
+            file_path.write_text(json.dumps({"status": "ok"}) + "\n", encoding="utf-8")
+        else:
+            file_path.write_text(json.dumps({"ok": True}) + "\n", encoding="utf-8")
+
+    result = verify_runtime_exports(release=release, output_root=tmp_path.as_posix())
+    assert result["neo4j_export_ok"] is False
+    assert result["weaviate_export_ok"] is True
+    assert result["safe_for_supabase_upload"] is False
+    assert result["neo4j_manifest_status"] == "unavailable"
+
+
+def test_verify_safe_for_supabase_upload_true_only_when_both_ok(tmp_path: Path) -> None:
+    release = "status-ok"
+    runtime_root = tmp_path / release
+    (runtime_root / "neo4j").mkdir(parents=True, exist_ok=True)
+    (runtime_root / "weaviate").mkdir(parents=True, exist_ok=True)
+
+    for rel in expected_runtime_files()["neo4j"] + expected_runtime_files()["weaviate"]:
+        file_path = runtime_root / rel
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        if file_path.suffix == ".md":
+            file_path.write_text("# snapshot\n", encoding="utf-8")
+        elif rel == "neo4j/graph_export_manifest.json":
+            file_path.write_text(json.dumps({"status": "ok"}) + "\n", encoding="utf-8")
+        elif rel == "weaviate/backup_manifest.json":
+            file_path.write_text(json.dumps({"status": "ok"}) + "\n", encoding="utf-8")
+        else:
+            file_path.write_text(json.dumps({"ok": True}) + "\n", encoding="utf-8")
+
+    result = verify_runtime_exports(release=release, output_root=tmp_path.as_posix())
+    assert result["neo4j_export_ok"] is True
+    assert result["weaviate_export_ok"] is True
+    assert result["safe_for_supabase_upload"] is True
 
 
 def test_scripts_contain_no_hardcoded_passwords() -> None:

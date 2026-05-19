@@ -10,7 +10,7 @@ Local-first alcohol risk estimation and safety guidance system with deterministi
 
 ## Monorepo Layout
 - `backend/`: FastAPI backend, reasoning pipeline, simulation, RAG integration, scripts, tests, Docker config.
-- `frontend/`: React + TypeScript + Vite user interface (SoberScope).
+- `frontend/`: React + TypeScript + Vite user interface (Zer0 G0nd0g0l).
 - `infra/`: Placeholder docs for Docker/CI/CD/Azure/DNS setup.
 - `docs/`: Architecture, memory, deployment planning.
 - `data/artifact_manifest.example.json`: committed lightweight artifact manifest only.
