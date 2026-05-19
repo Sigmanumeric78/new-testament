@@ -103,3 +103,8 @@ Thumbs.db
 # ============================================================
 frontend/node_modules/
 frontend/dist/
+# Keep repo docs minimal
+*.md
+!README.md
+!backend/rag/neo4j/neo4j_graph_schema_design.md
+!backend/rag/weaviate/weaviate_schema_design.md
