@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, Set
+import inspect
 
 import pytest
 
@@ -172,6 +173,45 @@ def test_health_endpoint_returns_valid_json() -> None:
     assert "detail" in artifact
     assert "missing_required_count" in artifact
     assert "missing_required" in artifact
+
+
+def test_ollama_probe_uses_http_host(monkeypatch: Any) -> None:
+    import api.health as health_module
+
+    class _FakeResponse:
+        def __init__(self, payload: str) -> None:
+            self.status = 200
+            self._payload = payload.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+    monkeypatch.setattr(health_module, "get_ollama_config", lambda: {"host": "http://localhost:11434", "model": "qwen2.5:3b"})
+    monkeypatch.setattr(
+        health_module,
+        "urlopen",
+        lambda request, timeout=4: _FakeResponse('{"models":[{"name":"qwen2.5:3b"}]}'),
+    )
+
+    payload = health_module._ollama_probe()
+    assert payload["ok"] is True
+    assert payload["detail"].startswith("ok")
+
+
+def test_ollama_probe_does_not_require_cli() -> None:
+    import api.health as health_module
+
+    source = inspect.getsource(health_module._ollama_probe)
+    module_source = inspect.getsource(health_module)
+    assert "urlopen" in source
+    assert "subprocess.run" not in module_source
 
 
 def test_cors_origins_include_local_5173_and_no_wildcard() -> None:

@@ -10,11 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from utils.config import get_project_root
+from utils.config import get_data_root, get_project_root
 
-MATRIX_RELATIVE_PATH = Path("data/processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv")
-PUBCHEM_JSON_RELATIVE_PATH = Path("data/raw/06_pubchem_cheminformatics/json")
-PUBCHEM_SDF_RELATIVE_PATH = Path("data/raw/06_pubchem_cheminformatics/sdf")
+MATRIX_DATA_RELATIVE_PATH = Path("processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv")
+PUBCHEM_JSON_DATA_RELATIVE_PATH = Path("raw/06_pubchem_cheminformatics/json")
+PUBCHEM_SDF_DATA_RELATIVE_PATH = Path("raw/06_pubchem_cheminformatics/sdf")
 
 CID_PATTERN = re.compile(r"CID_(\d+)")
 
@@ -105,9 +105,10 @@ class ChemicalCatalog:
         pubchem_sdf_root: Optional[Path] = None,
     ) -> None:
         self.project_root = project_root or get_project_root()
-        self.matrix_path = matrix_path or (self.project_root / MATRIX_RELATIVE_PATH)
-        self.pubchem_json_root = pubchem_json_root or (self.project_root / PUBCHEM_JSON_RELATIVE_PATH)
-        self.pubchem_sdf_root = pubchem_sdf_root or (self.project_root / PUBCHEM_SDF_RELATIVE_PATH)
+        self.data_root = (self.project_root / "data") if project_root is not None else get_data_root()
+        self.matrix_path = matrix_path or (self.data_root / MATRIX_DATA_RELATIVE_PATH)
+        self.pubchem_json_root = pubchem_json_root or (self.data_root / PUBCHEM_JSON_DATA_RELATIVE_PATH)
+        self.pubchem_sdf_root = pubchem_sdf_root or (self.data_root / PUBCHEM_SDF_DATA_RELATIVE_PATH)
 
         self._loaded = False
         self._records: List[Dict[str, Any]] = []

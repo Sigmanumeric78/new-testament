@@ -8,31 +8,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
-
-def _is_repo_root(path: Path) -> bool:
-    return (path / "backend").is_dir() and (path / "README.md").exists()
-
-
-def _is_backend_root(path: Path) -> bool:
-    return (path / "api").is_dir() and (path / "reasoning").is_dir() and (path / "simulation").is_dir()
-
+from utils.config import get_project_root as config_project_root
+from utils.config import resolve_project_path
 
 def get_project_root() -> Path:
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        if _is_repo_root(parent):
-            return parent
-    for parent in current.parents:
-        if _is_backend_root(parent):
-            return parent
-    return Path(__file__).resolve().parents[1]
+    return config_project_root()
 
 
 def resolve_path(local_path: str) -> Path:
-    candidate = Path(local_path)
-    if candidate.is_absolute():
-        return candidate
-    return get_project_root() / candidate
+    return resolve_project_path(local_path)
 
 
 def exists(local_path: str) -> bool:

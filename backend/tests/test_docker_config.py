@@ -26,6 +26,13 @@ def test_dockerfile_does_not_copy_env() -> None:
     assert "copy .env" not in text
 
 
+def test_dockerfile_copies_only_manifest_from_data() -> None:
+    text = _read(BACKEND_ROOT / "Dockerfile")
+    assert "COPY data/artifact_manifest.example.json /app/data/artifact_manifest.example.json" in text
+    assert "COPY data/ /app/data" not in text
+    assert "COPY data /app/data" not in text
+
+
 def test_dockerignore_excludes_data_raw_and_embeddings() -> None:
     text = _read(MONOREPO_ROOT / ".dockerignore")
     assert "data/raw" in text
@@ -59,6 +66,11 @@ def test_required_scripts_exist_and_executable() -> None:
     for script in scripts:
         assert script.exists(), f"missing script: {script}"
         assert os.access(script, os.X_OK), f"script is not executable: {script}"
+
+
+def test_docker_run_script_sets_project_root() -> None:
+    text = _read(BACKEND_ROOT / "scripts/docker_run_api.sh")
+    assert 'PROJECT_ROOT=/app' in text
 
 
 def test_docker_publish_workflow_exists() -> None:

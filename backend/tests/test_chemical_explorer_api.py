@@ -39,6 +39,14 @@ def test_chemical_catalog_builds_from_local_data() -> None:
     assert catalog.compounds_with_3d_count >= 1
 
 
+def test_chemical_catalog_uses_project_data_root(monkeypatch: Any) -> None:
+    monkeypatch.setenv("PROJECT_ROOT", "/app")
+    catalog = ChemicalCatalog(project_root=Path("/app"))
+    assert catalog.matrix_path.as_posix() == "/app/data/processed/beverage/compound_profiles/beverage_compound_matrix_expanded.csv"
+    assert catalog.pubchem_json_root.as_posix() == "/app/data/raw/06_pubchem_cheminformatics/json"
+    assert catalog.pubchem_sdf_root.as_posix() == "/app/data/raw/06_pubchem_cheminformatics/sdf"
+
+
 def test_chemicals_list_route_returns_valid_payload() -> None:
     payload = list_chemicals(q="", chemical_class="", has_3d=None, limit=8, offset=0)
 

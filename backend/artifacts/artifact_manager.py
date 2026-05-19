@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 from artifacts.local_store import (
     exists,
     modified_time,
+    resolve_path,
     sha256,
     size_bytes,
     validate_min_size,
@@ -19,7 +19,7 @@ from artifacts.manifest import ArtifactSpec, ArtifactStatus
 
 
 def load_manifest(path: str) -> List[ArtifactSpec]:
-    manifest_path = Path(path)
+    manifest_path = resolve_path(path)
     with manifest_path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
 
@@ -155,7 +155,7 @@ def write_local_manifest(statuses: Sequence[ArtifactStatus], output_path: str) -
         "artifacts": [status.to_dict() for status in statuses],
     }
 
-    out = Path(output_path)
+    out = resolve_path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)

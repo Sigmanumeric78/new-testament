@@ -104,6 +104,10 @@ npm run dev
 docker compose -f backend/docker-compose.local.yml up --build
 ```
 
+Manual `docker run` should set:
+- `PROJECT_ROOT=/app`
+- `PYTHONPATH=/app/backend`
+
 ## Useful Commands
 ```bash
 PYTHONPATH=backend python3 backend/app_cli.py --health

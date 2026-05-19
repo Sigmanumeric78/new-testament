@@ -40,21 +40,25 @@ def log_request(
     error: Optional[str],
     stage: str,
 ) -> None:
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    row = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "endpoint": _clean_text(endpoint),
-        "query_hash": query_hash(query),
-        "query_length": len(query),
-        "response_style": _clean_text(response_style) or None,
-        "risk_level": _clean_text(risk_level) or None,
-        "safe_for_display": safe_for_display,
-        "latency_ms": round(float(latency_ms), 3),
-        "error": _clean_text(error) or None,
-        "stage": _clean_text(stage),
-    }
-    with LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, sort_keys=True) + "\n")
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "endpoint": _clean_text(endpoint),
+            "query_hash": query_hash(query),
+            "query_length": len(query),
+            "response_style": _clean_text(response_style) or None,
+            "risk_level": _clean_text(risk_level) or None,
+            "safe_for_display": safe_for_display,
+            "latency_ms": round(float(latency_ms), 3),
+            "error": _clean_text(error) or None,
+            "stage": _clean_text(stage),
+        }
+        with LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+    except Exception:
+        # Logging must never break request handling (e.g., read-only mounts in Docker).
+        return
 
 
 def structured_error(message: str, stage: str) -> Mapping[str, Any]:

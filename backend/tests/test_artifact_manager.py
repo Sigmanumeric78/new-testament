@@ -15,6 +15,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from artifacts.artifact_manager import check_all_artifacts, get_missing_required, load_manifest, summarize_artifacts
 from artifacts.local_store import sha256
+from utils.config import get_project_root, resolve_project_path
 
 
 def _write_manifest(path: Path, artifacts: List[Dict[str, Any]]) -> Path:
@@ -32,6 +33,19 @@ def test_manifest_loads_from_example() -> None:
     ids = {spec.artifact_id for spec in specs}
     assert "core_master_beverage_reference_repaired" in ids
     assert "weaviate_schema_design" in ids
+
+
+def test_project_root_respects_project_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROJECT_ROOT", "/app")
+    assert get_project_root().as_posix() == "/app"
+
+
+def test_resolve_project_path_for_backend_and_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROJECT_ROOT", "/app")
+    backend_path = resolve_project_path("backend/rag/neo4j/neo4j_graph_schema_design.md")
+    data_path = resolve_project_path("data/artifact_manifest.example.json")
+    assert backend_path.as_posix() == "/app/backend/rag/neo4j/neo4j_graph_schema_design.md"
+    assert data_path.as_posix() == "/app/data/artifact_manifest.example.json"
 
 
 def test_manifest_schema_design_paths_point_to_backend_monorepo() -> None:
@@ -56,6 +70,15 @@ def test_manifest_schema_design_files_validate_when_present() -> None:
 
     assert by_id["neo4j_graph_schema_design"].validation_status == "ok"
     assert by_id["weaviate_schema_design"].validation_status == "ok"
+
+
+def test_manifest_schema_design_files_validate_with_explicit_project_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROJECT_ROOT", REPO_ROOT.as_posix())
+    manifest_path = REPO_ROOT / "data/artifact_manifest.example.json"
+    specs = load_manifest(manifest_path.as_posix())
+    filtered = [spec for spec in specs if spec.artifact_id in {"neo4j_graph_schema_design", "weaviate_schema_design"}]
+    statuses = check_all_artifacts(filtered)
+    assert all(item.validation_status == "ok" for item in statuses)
 
 
 def test_missing_artifacts_detected_with_temp_manifest(tmp_path: Path) -> None:

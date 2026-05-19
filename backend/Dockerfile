@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend/ /app/backend
+COPY data/artifact_manifest.example.json /app/data/artifact_manifest.example.json
 
 EXPOSE 8000
 

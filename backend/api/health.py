@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-import shutil
 import socket
-import subprocess
-from pathlib import Path
+import json
 from typing import Any, Dict, List
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 
 from fastapi import APIRouter
 
 from artifacts.artifact_manager import check_all_artifacts, load_manifest, summarize_artifacts
-from artifacts.local_store import get_project_root
 from reasoning.grounding_safety_guard import GroundingSafetyGuard
 from reasoning.hybrid_orchestrator import orchestrate_query
 from reasoning.query_router import route_query
 from reasoning.response_synthesizer import ResponseSynthesizer
 from reasoning.user_risk_advisor import build_user_risk_advice
 from simulation.pbpk import pbpk_master_simulator
-from utils.config import get_neo4j_config, get_weaviate_config
+from utils.config import get_neo4j_config, get_ollama_config, get_weaviate_config, resolve_project_path
 
 router = APIRouter()
-ARTIFACT_MANIFEST_PATH = get_project_root() / "data" / "artifact_manifest.example.json"
+ARTIFACT_MANIFEST_PATH = resolve_project_path("data/artifact_manifest.example.json")
 
 
 def _clean_text(value: Any) -> str:
@@ -81,21 +80,31 @@ def _weaviate_probe() -> Dict[str, Any]:
 
 
 def _ollama_probe() -> Dict[str, Any]:
-    if shutil.which("ollama") is None:
-        return _component(False, "ollama executable not found")
     try:
-        completed = subprocess.run(
-            ["ollama", "list"],
-            text=True,
-            capture_output=True,
-            timeout=4,
-            check=False,
-        )
+        config = get_ollama_config()
+        host = _clean_text(config.get("host")) or "http://localhost:11434"
+        model = _clean_text(config.get("model"))
+        url = urljoin(host.rstrip("/") + "/", "api/tags")
+        req = Request(url=url, method="GET")
+        with urlopen(req, timeout=4) as response:  # noqa: S310 - local host URL from config
+            status = int(getattr(response, "status", 200))
+            body = response.read().decode("utf-8", errors="replace")
+        if status != 200:
+            return _component(False, f"ollama http {status}")
+        payload = json.loads(body or "{}")
+        models = payload.get("models", []) if isinstance(payload, dict) else []
+        detail = "ok"
+        if model and isinstance(models, list):
+            model_names = {
+                _clean_text(item.get("name"))
+                for item in models
+                if isinstance(item, dict) and _clean_text(item.get("name"))
+            }
+            if model not in model_names:
+                detail = f"ok (model {model} not listed)"
+        return _component(True, detail)
     except Exception as exc:
         return _component(False, str(exc))
-    if completed.returncode != 0:
-        return _component(False, _clean_text(completed.stderr) or "ollama list failed")
-    return _component(True, "ok")
 
 
 def _artifact_probe() -> Dict[str, Any]:

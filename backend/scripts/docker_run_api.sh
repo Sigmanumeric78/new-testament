@@ -27,6 +27,7 @@ RUN_ARGS=(
   -e "WEAVIATE_GRPC_HOST=${WEAVIATE_GRPC_HOST:-host.docker.internal}"
   -e "WEAVIATE_GRPC_PORT=${WEAVIATE_GRPC_PORT:-50051}"
   -e "OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}"
+  -e "PROJECT_ROOT=/app"
   -e "PYTHONPATH=/app/backend"
   --add-host=host.docker.internal:host-gateway
   -p 8000:8000

@@ -16,27 +16,83 @@ REQUIRED_NEO4J_KEYS = (
 )
 
 
-def backend_root() -> Path:
+def _clean_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def get_backend_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def backend_root() -> Path:
+    return get_backend_root()
+
+
+def _resolve_env_root(value: str) -> Path:
+    candidate = Path(value).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return (Path.cwd() / candidate).resolve()
+
+
+def _is_project_root_candidate(path: Path) -> bool:
+    return (path / "backend").is_dir()
+
+
 def project_root() -> Path:
+    env_root = _clean_text(os.getenv("PROJECT_ROOT"))
+    if env_root:
+        return _resolve_env_root(env_root)
+
     current = Path(__file__).resolve()
+    best_with_data: Path | None = None
+    best_without_data: Path | None = None
+
     for parent in current.parents:
-        if (parent / "backend").is_dir() and (parent / "README.md").exists():
-            return parent
-    return backend_root()
+        if not _is_project_root_candidate(parent):
+            continue
+        if (parent / "data").exists():
+            best_with_data = parent
+            break
+        if best_without_data is None:
+            best_without_data = parent
+
+    if best_with_data is not None:
+        return best_with_data
+    if best_without_data is not None:
+        return best_without_data
+    return get_backend_root().parent if (get_backend_root().parent / "backend").is_dir() else get_backend_root()
 
 
 def get_project_root() -> Path:
     return project_root()
 
 
+def get_data_root() -> Path:
+    return get_project_root() / "data"
+
+
+def resolve_project_path(relative_path: str | Path) -> Path:
+    candidate = Path(relative_path)
+    if candidate.is_absolute():
+        return candidate
+    return get_project_root() / candidate
+
+
+def resolve_data_path(relative_path: str | Path) -> Path:
+    candidate = Path(relative_path)
+    if candidate.is_absolute():
+        return candidate
+    return get_data_root() / candidate
+
+
 def env_file_path() -> Path:
     repo_env = project_root() / ".env"
     if repo_env.exists():
         return repo_env
-    backend_env = backend_root() / ".env"
+    backend_env = get_backend_root() / ".env"
     if backend_env.exists():
         return backend_env
     return repo_env

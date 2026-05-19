@@ -30,6 +30,10 @@ bash backend/scripts/docker_build.sh
 bash backend/scripts/docker_run_api.sh
 ```
 
+Manual run should include:
+- `PROJECT_ROOT=/app`
+- `PYTHONPATH=/app/backend`
+
 ## Local Run (compose)
 
 ```bash
