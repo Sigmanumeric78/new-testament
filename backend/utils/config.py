@@ -69,15 +69,15 @@ def project_root() -> Path:
 def get_project_root() -> Path:
     return project_root()
 
-
-def get_data_root() -> Path:
-    return get_project_root() / "data"
-
-
 def resolve_project_path(relative_path: str | Path) -> Path:
     candidate = Path(relative_path)
     if candidate.is_absolute():
         return candidate
+    text = candidate.as_posix().lstrip("./")
+    if text == "data":
+        return get_data_root()
+    if text.startswith("data/"):
+        return get_data_root() / text[len("data/") :]
     return get_project_root() / candidate
 
 
@@ -85,7 +85,20 @@ def resolve_data_path(relative_path: str | Path) -> Path:
     candidate = Path(relative_path)
     if candidate.is_absolute():
         return candidate
+    text = candidate.as_posix().lstrip("./")
+    if text == "data":
+        return get_data_root()
+    if text.startswith("data/"):
+        return get_data_root() / text[len("data/") :]
     return get_data_root() / candidate
+
+
+def get_data_root() -> Path:
+    env_data = _clean_text(os.getenv("DATA_ROOT"))
+    if env_data:
+        candidate = _resolve_env_root(env_data)
+        return candidate
+    return get_project_root() / "data"
 
 
 def env_file_path() -> Path:

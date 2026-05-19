@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter
 
-from artifacts.artifact_manager import check_all_artifacts, load_manifest, summarize_artifacts
+from artifacts.artifact_manager import check_all_artifacts, filter_runtime_specs, load_manifest, summarize_artifacts
 from reasoning.grounding_safety_guard import GroundingSafetyGuard
 from reasoning.hybrid_orchestrator import orchestrate_query
 from reasoning.query_router import route_query
@@ -117,7 +117,10 @@ def _artifact_probe() -> Dict[str, Any]:
 
     try:
         manifest = load_manifest(ARTIFACT_MANIFEST_PATH.as_posix())
-        statuses = check_all_artifacts(manifest)
+        runtime_specs = filter_runtime_specs(manifest)
+        if not runtime_specs:
+            return _artifact_component(False, "no runtime artifacts selected from manifest", missing_required=[])
+        statuses = check_all_artifacts(runtime_specs)
         summary = summarize_artifacts(statuses)
     except Exception as exc:
         return _artifact_component(False, f"artifact status check failed: {exc}", missing_required=[])

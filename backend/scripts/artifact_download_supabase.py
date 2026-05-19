@@ -11,13 +11,14 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() else BACKEND_ROOT
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from artifacts.artifact_manager import is_runtime_artifact_record  # noqa: E402
 from artifacts.local_store import resolve_path  # noqa: E402
 from artifacts.release_manifest import default_release_dir  # noqa: E402
 from artifacts.supabase_store import SupabaseArtifactStore  # noqa: E402
@@ -33,6 +34,29 @@ def _clean_text(value: Any) -> str:
     if lowered in {"none", "null", "nan"}:
         return ""
     return text
+
+
+def _validate_release_name(value: str) -> str:
+    release = _clean_text(value)
+    if not release:
+        raise ValueError("release name is required")
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+    if any(ch not in allowed for ch in release):
+        raise ValueError("release name contains unsupported characters")
+    return release
+
+
+def _workspace_dir_from_args(release: str, workspace_dir_raw: str) -> Path:
+    if _clean_text(workspace_dir_raw):
+        base = Path(workspace_dir_raw)
+        if not base.is_absolute():
+            base = REPO_ROOT / base
+        return base
+    return Path("/tmp") / "artifact_restore" / release
+
+
+def _artifact_workspace_manifest_path(workspace_dir: Path) -> Path:
+    return workspace_dir / "artifact_manifest.json"
 
 
 def _sha256_file(path: Path) -> str:
@@ -57,27 +81,33 @@ def _load_chunk_manifest(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_release_manifest_local(release: str, release_dir: Path | None = None) -> Dict[str, Any]:
+def load_release_manifest_local(release: str, release_dir: Path | None = None) -> Tuple[Dict[str, Any], Path]:
     base = release_dir or default_release_dir(release)
     manifest_path = base / "artifact_manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(f"Release manifest not found at {manifest_path}")
-    return json.loads(manifest_path.read_text(encoding="utf-8"))
+    return json.loads(manifest_path.read_text(encoding="utf-8")), manifest_path
 
 
-def compute_download_plan(release_manifest: Dict[str, Any]) -> Dict[str, Any]:
-    artifacts = list(release_manifest.get("artifacts", []) or [])
+def compute_download_plan(
+    release_manifest: Dict[str, Any],
+    *,
+    runtime_only: bool,
+    workspace_dir: Path,
+) -> Dict[str, Any]:
+    artifacts_all = list(release_manifest.get("artifacts", []) or [])
+    artifacts = [item for item in artifacts_all if isinstance(item, dict)]
+    if runtime_only:
+        artifacts = [item for item in artifacts if is_runtime_artifact_record(item)]
     candidates: List[Dict[str, str]] = []
     checksum_mismatches: List[str] = []
     missing_local: List[str] = []
+    unavailable_required: List[str] = []
     chunked_restore: List[Dict[str, Any]] = []
     chunked_total_chunks = 0
     chunked_total_bytes = 0
 
     for artifact in artifacts:
-        if not isinstance(artifact, dict):
-            continue
-
         local_path_raw = _clean_text(artifact.get("local_path"))
         expected_sha = _clean_text(artifact.get("sha256"))
         available = bool(artifact.get("available", False))
@@ -87,6 +117,8 @@ def compute_download_plan(release_manifest: Dict[str, Any]) -> Dict[str, Any]:
         upload_strategy = _clean_text(artifact.get("upload_strategy")) or "direct"
 
         if not available:
+            if required:
+                unavailable_required.append(artifact_id)
             continue
 
         if upload_strategy == "chunked":
@@ -100,11 +132,11 @@ def compute_download_plan(release_manifest: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 missing_local.append(artifact_id)
 
-            chunk_manifest_path = _clean_text(artifact.get("chunk_manifest_path"))
             chunk_manifest_remote_path = _clean_text(artifact.get("chunk_manifest_remote_path"))
             chunk_count = _to_int(artifact.get("chunk_count"), 0)
             chunked_total_chunks += max(chunk_count, 0)
             chunked_total_bytes += _to_int(artifact.get("original_size_bytes"), 0)
+            chunk_manifest_path = (workspace_dir / "chunks" / artifact_id / "chunk_manifest.json").as_posix()
             chunked_restore.append(
                 {
                     "artifact_id": artifact_id,
@@ -114,6 +146,7 @@ def compute_download_plan(release_manifest: Dict[str, Any]) -> Dict[str, Any]:
                     "chunk_manifest_local_path": chunk_manifest_path,
                     "chunk_manifest_remote_path": chunk_manifest_remote_path,
                     "chunk_count": chunk_count,
+                    "remote_path": remote_path,
                 }
             )
             continue
@@ -143,6 +176,18 @@ def compute_download_plan(release_manifest: Dict[str, Any]) -> Dict[str, Any]:
                 }
             )
 
+    skipped_non_runtime_ids = []
+    if runtime_only:
+        selected_ids = {_clean_text(item.get("artifact_id")) for item in artifacts}
+        skipped_non_runtime_ids = sorted(
+            {
+                _clean_text(item.get("artifact_id")) or _clean_text(item.get("local_path"))
+                for item in artifacts_all
+                if isinstance(item, dict)
+                and (_clean_text(item.get("artifact_id")) or _clean_text(item.get("local_path"))) not in selected_ids
+            }
+        )
+
     return {
         "candidates": candidates,
         "missing_local": sorted(set(missing_local)),
@@ -151,6 +196,11 @@ def compute_download_plan(release_manifest: Dict[str, Any]) -> Dict[str, Any]:
         "chunked_artifact_count": len(chunked_restore),
         "chunked_total_chunks": int(chunked_total_chunks),
         "chunked_total_bytes": int(chunked_total_bytes),
+        "unavailable_required": sorted(set(unavailable_required)),
+        "runtime_only": bool(runtime_only),
+        "selected_artifact_count": len(artifacts),
+        "skipped_non_runtime_count": len(skipped_non_runtime_ids),
+        "skipped_non_runtime": skipped_non_runtime_ids,
     }
 
 
@@ -207,6 +257,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Dry-run mode (default)")
     parser.add_argument("--execute", action="store_true", help="Perform downloads")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing local files")
+    parser.add_argument(
+        "--workspace-dir",
+        default="",
+        help="Workspace directory for remote manifest/chunk metadata (default: /tmp/artifact_restore/<release>)",
+    )
+    parser.add_argument(
+        "--all-artifacts",
+        action="store_true",
+        help="Download all artifacts from release manifest (default is runtime-only subset).",
+    )
+    parser.add_argument(
+        "--runtime-only",
+        action="store_true",
+        help="Force runtime-only subset restore (default behavior).",
+    )
     return parser.parse_args()
 
 
@@ -214,22 +279,58 @@ def main() -> int:
     args = parse_args()
     execute = bool(args.execute)
     dry_run = bool(args.dry_run or not execute)
+    runtime_only = bool(args.runtime_only)
+    if bool(args.all_artifacts):
+        runtime_only = False
 
-    release = args.release.strip()
+    release = _validate_release_name(args.release)
+    workspace_dir = _workspace_dir_from_args(release, args.workspace_dir)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    workspace_manifest = _artifact_workspace_manifest_path(workspace_dir)
     release_dir = default_release_dir(release)
-    release_dir.mkdir(parents=True, exist_ok=True)
 
     if execute:
         store = SupabaseArtifactStore(require_credentials=True)
         remote_manifest = f"releases/{release}/artifact_manifest.json"
-        store.download_json(
+        store.download_file(
             remote_path=remote_manifest,
-            local_path=(release_dir / "artifact_manifest.json").as_posix(),
+            local_path=workspace_manifest.as_posix(),
             overwrite=True,
         )
 
-    release_manifest = load_release_manifest_local(release, release_dir)
-    plan = compute_download_plan(release_manifest)
+        for filename in ("release_metadata.json", "checksums.sha256"):
+            remote = f"releases/{release}/{filename}"
+            local = workspace_dir / filename
+            try:
+                store.download_file(remote_path=remote, local_path=local.as_posix(), overwrite=True)
+            except Exception:
+                # Optional for restore; keep going if not present.
+                pass
+
+        release_manifest = json.loads(workspace_manifest.read_text(encoding="utf-8"))
+        manifest_source = workspace_manifest.as_posix()
+    else:
+        if workspace_manifest.exists():
+            release_manifest = json.loads(workspace_manifest.read_text(encoding="utf-8"))
+            manifest_source = workspace_manifest.as_posix()
+        else:
+            release_manifest, local_manifest_path = load_release_manifest_local(release, release_dir)
+            manifest_source = local_manifest_path.as_posix()
+
+    plan = compute_download_plan(release_manifest, runtime_only=runtime_only, workspace_dir=workspace_dir)
+    if execute and plan["unavailable_required"]:
+        payload = {
+            "release": release,
+            "dry_run": dry_run,
+            "execute": execute,
+            "error": True,
+            "message": "Required artifacts are unavailable in release manifest.",
+            "manifest_source": manifest_source,
+            "unavailable_required": plan["unavailable_required"],
+            "runtime_only": runtime_only,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 1
 
     downloaded: List[str] = []
     restored_chunked: List[str] = []
@@ -268,16 +369,18 @@ def main() -> int:
                     raise ValueError(f"Invalid chunk entry at index {idx} for {artifact_id}")
                 part_remote_path = _clean_text(chunk.get("remote_path"))
                 part_name = _clean_text(chunk.get("part_name")) or f"part_{idx:05d}"
-                part_local_path_raw = _clean_text(chunk.get("local_path"))
+                part_local_path = manifest_local_path.parent / part_name
+                if not part_remote_path:
+                    remote_base = _clean_text(item.get("chunk_manifest_remote_path")) or _clean_text(item.get("remote_path"))
+                    if remote_base.endswith("/chunk_manifest.json"):
+                        part_remote_path = remote_base.rsplit("/", 1)[0] + f"/{part_name}"
                 if not part_remote_path:
                     raise ValueError(f"Missing chunk remote_path for {artifact_id}:{part_name}")
-                if not part_local_path_raw:
-                    part_local_path_raw = (manifest_local_path.parent / part_name).as_posix()
-                    chunk["local_path"] = part_local_path_raw
+                chunk["local_path"] = part_local_path.as_posix()
 
                 store.download_file(
                     remote_path=part_remote_path,
-                    local_path=part_local_path_raw,
+                    local_path=part_local_path.as_posix(),
                     overwrite=bool(args.overwrite),
                 )
                 downloaded.append(f"{artifact_id}:{part_name}")
@@ -291,12 +394,19 @@ def main() -> int:
 
     payload = {
         "release": release,
+        "manifest_source": manifest_source,
+        "workspace_dir": workspace_dir.as_posix(),
+        "runtime_only": runtime_only,
+        "selected_artifact_count": plan["selected_artifact_count"],
+        "skipped_non_runtime_count": plan["skipped_non_runtime_count"],
+        "skipped_non_runtime": plan["skipped_non_runtime"],
         "dry_run": dry_run,
         "execute": execute,
         "candidate_count": len(plan["candidates"]),
         "chunked_artifact_count": plan["chunked_artifact_count"],
         "chunked_total_chunks": plan["chunked_total_chunks"],
         "chunked_total_bytes": plan["chunked_total_bytes"],
+        "unavailable_required": plan["unavailable_required"],
         "downloaded_count": len(downloaded),
         "downloaded": downloaded,
         "restored_chunked_count": len(restored_chunked),

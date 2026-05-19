@@ -17,6 +17,40 @@ from artifacts.local_store import (
 )
 from artifacts.manifest import ArtifactSpec, ArtifactStatus
 
+RUNTIME_REQUIRED_CATEGORIES = {
+    "core_processed_tables",
+    "neo4j_initialization_inputs",
+    "weaviate_materialized_jsonl",
+    "weaviate_schema_design_inputs",
+}
+RUNTIME_REQUIRED_ARTIFACT_IDS = {
+    "neo4j_graph_schema_design",
+    "weaviate_schema_design",
+}
+RUNTIME_EXCLUDED_PREFIXES = (
+    "data/interim/",
+    "data/raw/",
+    "data/releases/",
+    "data/exports/",
+    "data/chunks/",
+)
+
+
+def is_runtime_artifact_record(record: Mapping[str, Any]) -> bool:
+    artifact_id = str(record.get("artifact_id", "")).strip()
+    category = str(record.get("category", "")).strip()
+    local_path = str(record.get("local_path", "")).replace("\\", "/").strip().lstrip("./")
+
+    if local_path.startswith(RUNTIME_EXCLUDED_PREFIXES):
+        return False
+    if artifact_id in RUNTIME_REQUIRED_ARTIFACT_IDS:
+        return True
+    return category in RUNTIME_REQUIRED_CATEGORIES
+
+
+def filter_runtime_specs(specs: Sequence[ArtifactSpec]) -> List[ArtifactSpec]:
+    return [spec for spec in specs if is_runtime_artifact_record(spec.to_dict())]
+
 
 def load_manifest(path: str) -> List[ArtifactSpec]:
     manifest_path = resolve_path(path)

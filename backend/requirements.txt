@@ -11,3 +11,4 @@ pyarrow
 pypdf
 pytest
 httpx
+supabase

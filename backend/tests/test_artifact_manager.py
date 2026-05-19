@@ -13,7 +13,13 @@ REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() el
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from artifacts.artifact_manager import check_all_artifacts, get_missing_required, load_manifest, summarize_artifacts
+from artifacts.artifact_manager import (
+    check_all_artifacts,
+    filter_runtime_specs,
+    get_missing_required,
+    load_manifest,
+    summarize_artifacts,
+)
 from artifacts.local_store import sha256
 from utils.config import get_project_root, resolve_project_path
 
@@ -70,6 +76,15 @@ def test_manifest_schema_design_files_validate_when_present() -> None:
 
     assert by_id["neo4j_graph_schema_design"].validation_status == "ok"
     assert by_id["weaviate_schema_design"].validation_status == "ok"
+
+
+def test_runtime_filter_includes_schema_design_inputs() -> None:
+    manifest_path = REPO_ROOT / "data/artifact_manifest.example.json"
+    specs = load_manifest(manifest_path.as_posix())
+    runtime_specs = filter_runtime_specs(specs)
+    runtime_ids = {spec.artifact_id for spec in runtime_specs}
+    assert "neo4j_graph_schema_design" in runtime_ids
+    assert "weaviate_schema_design" in runtime_ids
 
 
 def test_manifest_schema_design_files_validate_with_explicit_project_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,12 +244,12 @@ def test_missing_artifacts_degrade_health_without_crash(monkeypatch: Any, tmp_pa
     manifest_path = _write_manifest(
         tmp_path / "manifest.json",
         [
-            {
-                "artifact_id": "required_missing",
-                "category": "test",
-                "local_path": (tmp_path / "not_here.csv").as_posix(),
-                "required_for": ["unit"],
-                "required": True,
+                {
+                    "artifact_id": "required_missing",
+                    "category": "core_processed_tables",
+                    "local_path": (tmp_path / "not_here.csv").as_posix(),
+                    "required_for": ["unit"],
+                    "required": True,
                 "expected_type": "csv",
                 "min_size_bytes": 1,
                 "description": "missing",

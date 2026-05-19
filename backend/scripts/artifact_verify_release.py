@@ -15,6 +15,7 @@ REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() el
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from artifacts.artifact_manager import is_runtime_artifact_record  # noqa: E402
 from artifacts.local_store import resolve_path  # noqa: E402
 from artifacts.release_manifest import default_release_dir  # noqa: E402
 
@@ -46,9 +47,17 @@ def _load_chunk_manifest(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]:
+def verify_release_manifest(
+    release: str,
+    manifest_path: Path,
+    *,
+    runtime_only: bool = False,
+    workspace_dir: Path | None = None,
+) -> Dict[str, Any]:
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    artifacts = list(payload.get("artifacts", []) or [])
+    artifacts_all = [item for item in list(payload.get("artifacts", []) or []) if isinstance(item, dict)]
+    artifacts = [item for item in artifacts_all if (not runtime_only or is_runtime_artifact_record(item))]
+    skipped_non_runtime = len(artifacts_all) - len(artifacts)
 
     missing: List[str] = []
     checksum_mismatches: List[str] = []
@@ -59,9 +68,6 @@ def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]
     required_invalid = False
 
     for artifact in artifacts:
-        if not isinstance(artifact, dict):
-            continue
-
         artifact_id = _clean_text(artifact.get("artifact_id")) or _clean_text(artifact.get("local_path"))
         local_path_raw = _clean_text(artifact.get("local_path"))
         expected_sha = _clean_text(artifact.get("sha256"))
@@ -90,14 +96,23 @@ def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]
                     valid_count += 1
                 continue
 
-            chunk_manifest_path_raw = _clean_text(artifact.get("chunk_manifest_path"))
-            if not chunk_manifest_path_raw:
+            chunk_manifest_path = None
+            if workspace_dir is not None:
+                candidate = workspace_dir / "chunks" / artifact_id / "chunk_manifest.json"
+                if candidate.exists():
+                    chunk_manifest_path = candidate
+
+            if chunk_manifest_path is None:
+                chunk_manifest_path_raw = _clean_text(artifact.get("chunk_manifest_path"))
+                if chunk_manifest_path_raw:
+                    chunk_manifest_path = resolve_path(chunk_manifest_path_raw)
+
+            if chunk_manifest_path is None:
                 missing.append(f"{artifact_id}:chunk_manifest")
                 invalid_count += 1
                 if required:
                     required_invalid = True
                 continue
-            chunk_manifest_path = resolve_path(chunk_manifest_path_raw)
             if not chunk_manifest_path.exists():
                 missing.append(f"{artifact_id}:chunk_manifest")
                 invalid_count += 1
@@ -165,6 +180,9 @@ def verify_release_manifest(release: str, manifest_path: Path) -> Dict[str, Any]
     return {
         "release": release,
         "all_required_valid": (not required_invalid),
+        "runtime_only": bool(runtime_only),
+        "selected_artifact_count": len(artifacts),
+        "skipped_non_runtime_count": int(max(skipped_non_runtime, 0)),
         "missing": sorted(set(missing)),
         "checksum_mismatches": sorted(set(checksum_mismatches)),
         "valid_count": int(valid_count),
@@ -177,17 +195,35 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Verify local release artifacts")
     parser.add_argument("--release", required=True, help="Release name")
     parser.add_argument("--manifest", default="", help="Optional explicit release manifest path")
+    parser.add_argument(
+        "--workspace-dir",
+        default="",
+        help="Optional workspace directory containing downloaded manifest/chunk files.",
+    )
+    parser.add_argument("--runtime-only", action="store_true", help="Verify runtime-only artifact subset.")
+    parser.add_argument("--all-artifacts", action="store_true", help="Verify full artifact set.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     release = args.release.strip()
+    runtime_only = bool(args.runtime_only)
+    if bool(args.all_artifacts):
+        runtime_only = False
+    workspace_dir: Path | None = None
+    if _clean_text(args.workspace_dir):
+        candidate = Path(args.workspace_dir)
+        if not candidate.is_absolute():
+            candidate = REPO_ROOT / candidate
+        workspace_dir = candidate
 
     if args.manifest:
         manifest_path = Path(args.manifest)
         if not manifest_path.is_absolute():
             manifest_path = REPO_ROOT / manifest_path
+    elif workspace_dir is not None:
+        manifest_path = workspace_dir / "artifact_manifest.json"
     else:
         manifest_path = default_release_dir(release) / "artifact_manifest.json"
 
@@ -195,6 +231,7 @@ def main() -> int:
         payload = {
             "release": release,
             "all_required_valid": False,
+            "runtime_only": runtime_only,
             "missing": [f"manifest:{manifest_path.as_posix()}"],
             "checksum_mismatches": [],
             "valid_count": 0,
@@ -203,7 +240,12 @@ def main() -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 1
 
-    payload = verify_release_manifest(release, manifest_path)
+    payload = verify_release_manifest(
+        release,
+        manifest_path,
+        runtime_only=runtime_only,
+        workspace_dir=workspace_dir,
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if payload.get("all_required_valid") else 2
 

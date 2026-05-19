@@ -414,12 +414,123 @@ def test_dry_run_download_does_not_call_supabase(monkeypatch: pytest.MonkeyPatch
         lambda: type(
             "Args",
             (),
-            {"release": release, "dry_run": True, "execute": False, "overwrite": False},
+            {
+                "release": release,
+                "dry_run": True,
+                "execute": False,
+                "overwrite": False,
+                "workspace_dir": "",
+                "all_artifacts": True,
+                "runtime_only": False,
+            },
         )(),
     )
 
     rc = artifact_download_supabase.main()
     assert rc == 0
+
+
+def test_download_plan_runtime_only_filters_non_runtime(tmp_path: Path) -> None:
+    runtime_file = tmp_path / "backend" / "rag" / "weaviate" / "weaviate_schema_design.md"
+    runtime_file.parent.mkdir(parents=True, exist_ok=True)
+    runtime_file.write_text("schema", encoding="utf-8")
+    non_runtime_file = tmp_path / "data" / "interim" / "ignored.json"
+    non_runtime_file.parent.mkdir(parents=True, exist_ok=True)
+    non_runtime_file.write_text('{"ok":true}', encoding="utf-8")
+
+    manifest = {
+        "release_name": "v0.6",
+        "artifacts": [
+            {
+                "artifact_id": "weaviate_schema_design",
+                "category": "weaviate_schema_design_inputs",
+                "local_path": runtime_file.as_posix(),
+                "remote_path": "releases/v0.6/backend/rag/weaviate/weaviate_schema_design.md",
+                "required": True,
+                "available": True,
+                "sha256": _sha(runtime_file),
+                "upload_strategy": "direct",
+            },
+            {
+                "artifact_id": "interim_noise",
+                "category": "validation_reports",
+                "local_path": non_runtime_file.as_posix(),
+                "remote_path": "releases/v0.6/data/interim/ignored.json",
+                "required": False,
+                "available": True,
+                "sha256": _sha(non_runtime_file),
+                "upload_strategy": "direct",
+            },
+        ],
+    }
+    plan = artifact_download_supabase.compute_download_plan(
+        manifest,
+        runtime_only=True,
+        workspace_dir=tmp_path / "workspace",
+    )
+    assert plan["selected_artifact_count"] == 1
+    assert plan["skipped_non_runtime_count"] == 1
+
+
+def test_execute_download_supports_overwrite_with_mock_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    release = "v0.6"
+    workspace = tmp_path / "workspace"
+    local_target = tmp_path / "data" / "processed" / "pbpk" / "pbpk_parameter_library.csv"
+
+    manifest_payload = {
+        "release_name": release,
+        "artifacts": [
+            {
+                "artifact_id": "pbpk_library",
+                "category": "core_processed_tables",
+                "local_path": local_target.as_posix(),
+                "remote_path": f"releases/{release}/data/processed/pbpk/pbpk_parameter_library.csv",
+                "required": True,
+                "available": True,
+                "sha256": hashlib.sha256(b"a,b\n1,2\n").hexdigest(),
+                "upload_strategy": "direct",
+            }
+        ],
+    }
+
+    class _Store:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls: List[tuple[str, str, bool]] = []
+
+        def download_file(self, remote_path: str, local_path: str, overwrite: bool = False) -> Path:
+            self.calls.append((remote_path, local_path, overwrite))
+            target = Path(local_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if remote_path.endswith("artifact_manifest.json"):
+                target.write_text(json.dumps(manifest_payload), encoding="utf-8")
+            elif remote_path.endswith(".csv"):
+                target.write_bytes(b"a,b\n1,2\n")
+            else:
+                target.write_text("{}", encoding="utf-8")
+            return target
+
+    monkeypatch.setattr(artifact_download_supabase, "SupabaseArtifactStore", _Store)
+    monkeypatch.setattr(
+        artifact_download_supabase,
+        "parse_args",
+        lambda: type(
+            "Args",
+            (),
+            {
+                "release": release,
+                "dry_run": False,
+                "execute": True,
+                "overwrite": True,
+                "workspace_dir": workspace.as_posix(),
+                "all_artifacts": True,
+                "runtime_only": False,
+            },
+        )(),
+    )
+
+    rc = artifact_download_supabase.main()
+    assert rc == 0
+    assert local_target.exists()
 
 
 def test_download_chunk_reassembly_validates_sha(tmp_path: Path) -> None:
@@ -490,7 +601,7 @@ def test_verify_detects_missing_chunk(tmp_path: Path) -> None:
     }
     _write_release_bundle_files(release_dir, manifest_payload)
 
-    payload = verify_release_manifest(release, release_dir / "artifact_manifest.json")
+    payload = verify_release_manifest(release, release_dir / "artifact_manifest.json", runtime_only=False)
     assert payload["all_required_valid"] is False
     assert any("part_00000" in item for item in payload["missing"])
 
@@ -548,7 +659,7 @@ def test_verify_detects_chunk_checksum_mismatch(tmp_path: Path) -> None:
     }
     _write_release_bundle_files(release_dir, manifest_payload)
 
-    payload = verify_release_manifest(release, release_dir / "artifact_manifest.json")
+    payload = verify_release_manifest(release, release_dir / "artifact_manifest.json", runtime_only=False)
     assert payload["all_required_valid"] is False
     assert payload["checksum_mismatches"]
 
@@ -594,7 +705,7 @@ def test_verify_chunked_restorable_when_chunks_are_present(tmp_path: Path) -> No
     }
     _write_release_bundle_files(release_dir, manifest_payload)
 
-    payload = verify_release_manifest(release, release_dir / "artifact_manifest.json")
+    payload = verify_release_manifest(release, release_dir / "artifact_manifest.json", runtime_only=False)
     assert payload["all_required_valid"] is True
     assert "big_one" in payload["restorable_chunked"]
 

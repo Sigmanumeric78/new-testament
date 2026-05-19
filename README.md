@@ -106,7 +106,32 @@ docker compose -f backend/docker-compose.local.yml up --build
 
 Manual `docker run` should set:
 - `PROJECT_ROOT=/app`
+- `DATA_ROOT=/app/data`
 - `PYTHONPATH=/app/backend`
+- `RESTORE_ARTIFACTS_ON_STARTUP=false` (default)
+- `ARTIFACT_RELEASE=v0.6-chemical-explorer` (default)
+
+To test Supabase restore-on-startup (no local `data/` mount):
+
+```bash
+docker run --rm \
+  --name alcohol-intelligence-api-test \
+  --network host \
+  --env-file .env \
+  -e PROJECT_ROOT=/app \
+  -e DATA_ROOT=/app/data \
+  -e RESTORE_ARTIFACTS_ON_STARTUP=true \
+  -e ARTIFACT_RELEASE=v0.6-chemical-explorer \
+  -e PYTHONPATH=/app/backend \
+  alcohol-intelligence-api:local
+```
+
+Startup behavior when restore mode is enabled:
+- Downloads release manifest from Supabase.
+- Restores runtime artifacts (runtime-only subset by default).
+- Reassembles chunked artifacts if needed.
+- Verifies checksums before API starts.
+- Fails fast if required runtime artifacts cannot be restored.
 
 Frontend image (static Nginx):
 
@@ -148,3 +173,17 @@ PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py --release 
 
 Use `--execute` only when you intentionally want live Supabase uploads/downloads.
 Oversized artifacts are auto-chunked using `SUPABASE_MAX_UPLOAD_MB` (default `45`), and reassembled on download with SHA256 verification.
+
+Runtime restore commands:
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/artifact_download_supabase.py \
+  --release v0.6-chemical-explorer \
+  --execute \
+  --overwrite \
+  --runtime-only
+
+PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py \
+  --release v0.6-chemical-explorer \
+  --runtime-only
+```

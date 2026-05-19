@@ -40,6 +40,27 @@ def test_dockerfile_copies_only_manifest_from_data() -> None:
     assert "COPY data /app/data" not in text
 
 
+def test_dockerfile_has_restore_startup_entrypoint_and_env_defaults() -> None:
+    text = _read(BACKEND_ROOT / "Dockerfile")
+    assert "ENTRYPOINT [\"bash\", \"/app/backend/docker-entrypoint.sh\"]" in text
+    assert "RESTORE_ARTIFACTS_ON_STARTUP=false" in text
+    assert "ARTIFACT_RELEASE=v0.6-chemical-explorer" in text
+    assert "PROJECT_ROOT=/app" in text
+    assert "DATA_ROOT=/app/data" in text
+
+
+def test_docker_entrypoint_exists_and_runs_restore_commands() -> None:
+    path = BACKEND_ROOT / "docker-entrypoint.sh"
+    assert path.exists()
+    text = _read(path)
+    assert "RESTORE_ARTIFACTS_ON_STARTUP" in text
+    assert "artifact_download_supabase.py" in text
+    assert "artifact_verify_release.py" in text
+    assert "--execute" in text
+    assert "--overwrite" in text
+    assert "--runtime-only" in text
+
+
 def test_dockerignore_excludes_data_raw_and_embeddings() -> None:
     text = _read(MONOREPO_ROOT / ".dockerignore")
     assert "data/raw" in text
