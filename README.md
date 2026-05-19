@@ -108,6 +108,23 @@ Manual `docker run` should set:
 - `PROJECT_ROOT=/app`
 - `PYTHONPATH=/app/backend`
 
+Frontend image (static Nginx):
+
+```bash
+docker build \
+  -f frontend/Dockerfile \
+  -t alcohol-intelligence-frontend:local \
+  --build-arg VITE_API_BASE_URL=http://localhost:8000 \
+  frontend
+
+docker run --rm \
+  --name alcohol-intelligence-frontend-test \
+  -p 5173:80 \
+  alcohol-intelligence-frontend:local
+```
+
+Open `http://localhost:5173`.
+
 ## Useful Commands
 ```bash
 PYTHONPATH=backend python3 backend/app_cli.py --health

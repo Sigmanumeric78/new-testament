@@ -12,12 +12,22 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE_NAME: ghcr.io/sigmanumeric78/new-testament-api
-
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: ghcr.io/sigmanumeric78/new-testament-api
+            dockerfile: backend/Dockerfile
+            context: .
+            build_args: ""
+          - image_name: ghcr.io/sigmanumeric78/new-testament-frontend
+            dockerfile: frontend/Dockerfile
+            context: frontend
+            build_args: |
+              VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL || 'http://localhost:8000' }}
 
     steps:
       - name: Checkout
@@ -38,6 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_NAME="${{ matrix.image_name }}"
           TAGS="${IMAGE_NAME}:sha-${GITHUB_SHA}"
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
@@ -51,10 +62,11 @@ jobs:
 
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push backend image
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: backend/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          build-args: ${{ matrix.build_args }}

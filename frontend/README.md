@@ -82,6 +82,34 @@ Then restart `npm run dev`.
 npm run build
 ```
 
+## Docker Build (Frontend)
+
+Build static production image (Nginx) with backend API base URL baked at build time:
+
+```bash
+docker build \
+  -f frontend/Dockerfile \
+  -t alcohol-intelligence-frontend:local \
+  --build-arg VITE_API_BASE_URL=http://localhost:8000 \
+  frontend
+```
+
+Run:
+
+```bash
+docker run --rm \
+  --name alcohol-intelligence-frontend-test \
+  -p 5173:80 \
+  alcohol-intelligence-frontend:local
+```
+
+Smoke test:
+
+```bash
+curl -I http://localhost:5173
+curl http://localhost:5173 | head
+```
+
 ## Notes
 - Ask flow calls `POST /ask`
 - Intake flow calls `POST /intake`

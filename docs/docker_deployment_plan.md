@@ -24,6 +24,16 @@ Open `http://localhost:5173`.
 bash backend/scripts/docker_build.sh
 ```
 
+Frontend build:
+
+```bash
+docker build \
+  -f frontend/Dockerfile \
+  -t alcohol-intelligence-frontend:local \
+  --build-arg VITE_API_BASE_URL=http://localhost:8000 \
+  frontend
+```
+
 ## Local Run (single container)
 
 ```bash
@@ -44,6 +54,15 @@ docker compose -f backend/docker-compose.local.yml up --build
 
 ```bash
 bash backend/scripts/docker_smoke_test.sh
+```
+
+Frontend smoke test:
+
+```bash
+docker run -d --name alcohol-intelligence-frontend-test -p 5173:80 alcohol-intelligence-frontend:local
+curl -I http://localhost:5173
+curl http://localhost:5173 | head
+docker stop alcohol-intelligence-frontend-test
 ```
 
 ## Required Host Services (for full functionality)
@@ -74,7 +93,8 @@ The Docker container connects to these through `host.docker.internal`.
 
 ## Future Plan
 
-1. GitHub Actions builds Docker image from main branch.
-2. Push image to GHCR.
-3. Azure Container Apps pulls and runs the image.
-4. Supabase provides artifact storage/config for runtime artifact resolution.
+1. GitHub Actions builds Docker images from main branch.
+2. Push backend and frontend images to GHCR.
+3. Azure Container Apps pulls and runs backend image.
+4. Frontend static image is served separately with production API URL baked via `VITE_API_BASE_URL`.
+5. Supabase provides artifact storage/config for runtime artifact resolution.

@@ -16,6 +16,13 @@ def test_dockerfile_exists() -> None:
     assert path.exists()
 
 
+def test_frontend_dockerfile_and_nginx_exist() -> None:
+    frontend_dockerfile = MONOREPO_ROOT / "frontend/Dockerfile"
+    frontend_nginx = MONOREPO_ROOT / "frontend/nginx.conf"
+    assert frontend_dockerfile.exists()
+    assert frontend_nginx.exists()
+
+
 def test_dockerignore_exists() -> None:
     path = MONOREPO_ROOT / ".dockerignore"
     assert path.exists()
@@ -39,6 +46,14 @@ def test_dockerignore_excludes_data_raw_and_embeddings() -> None:
     assert "data/processed" in text
     assert "data/interim" in text
     assert "data/processed/weaviate/embedded" in text
+
+
+def test_frontend_dockerignore_excludes_generated_and_env_files() -> None:
+    text = _read(MONOREPO_ROOT / "frontend/.dockerignore")
+    assert "node_modules" in text
+    assert "dist" in text
+    assert ".env" in text
+    assert ".env.local" in text
 
 
 def test_docker_compose_exists() -> None:
@@ -81,7 +96,10 @@ def test_docker_publish_workflow_exists() -> None:
 def test_docker_publish_workflow_references_backend_dockerfile_and_ghcr() -> None:
     text = _read(MONOREPO_ROOT / ".github/workflows/docker-publish.yml")
     assert "file: backend/Dockerfile" in text
+    assert "file: frontend/Dockerfile" in text
+    assert "context: frontend" in text
     assert "ghcr.io/sigmanumeric78/new-testament-api" in text
+    assert "ghcr.io/sigmanumeric78/new-testament-frontend" in text
     assert "docker/login-action" in text
     assert "docker/setup-buildx-action" in text
     assert "docker/build-push-action" in text

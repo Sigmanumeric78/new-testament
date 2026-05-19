@@ -29,3 +29,9 @@ neo4j_data
 weaviate_data
 databases
 transactions
+
+# Frontend generated artifacts
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.local
