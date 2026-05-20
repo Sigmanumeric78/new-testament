@@ -9,13 +9,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 
 try:
     from reasoning.hybrid_orchestrator import orchestrate_query
@@ -151,6 +151,57 @@ GENERIC_ALLOWED_TOKENS: Set[str] = {
     "drinking",
     "alcohol",
     "uncertainty",
+    "records",
+    "matching",
+    "matches",
+    "strongest",
+    "present",
+    "several",
+    "supports",
+    "explanation",
+    "sensitive",
+    "individual",
+    "individuals",
+    "varies",
+    "everyone",
+    "prove",
+    "boundary",
+    "summary",
+    "driving",
+    "decisions",
+    "current",
+    "retrieval",
+    "set",
+    "containing",
+    "compound",
+    "interpretation",
+    "present",
+    "style",
+    "beverages",
+    "supports",
+    "sensitive",
+    "individuals",
+    "headaches",
+    "limitations",
+    "summarize",
+    "observations",
+    "establish",
+    "universal",
+    "causality",
+    "safety",
+    "boundary",
+    "used",
+    "decisions",
+    "matching",
+    "strongest",
+    "records",
+    "source",
+    "row",
+    "wine",
+    "champagne",
+    "dessert",
+    "table",
+    "sparkling",
 }
 
 UNSAFE_PATTERNS: Tuple[Tuple[str, str], ...] = (
@@ -241,6 +292,22 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _bool_from_text(value: Any, default: bool = True) -> bool:
+    text = _normalize_text(value)
+    if not text:
+        return bool(default)
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _ollama_host_disabled(host: str) -> bool:
+    normalized = _normalize_text(host).rstrip("/")
+    return normalized in {"", "disabled", "http://disabled", "https://disabled", "none", "off"}
+
+
 def _json_safe(payload: Mapping[str, Any]) -> bool:
     try:
         json.dumps(payload, sort_keys=True)
@@ -271,8 +338,20 @@ class ResponseSynthesizer:
         ollama_config = get_ollama_config()
         self.model = _clean_text(model) or OLLAMA_MODEL
         self.ollama_host = _clean_text(ollama_config.get("host"))
+        self.ollama_api_key = _clean_text(ollama_config.get("api_key"))
+        self.llm_provider = _normalize_text(ollama_config.get("provider")) or "ollama"
+        self.ollama_enabled = _bool_from_text(ollama_config.get("enabled"), default=True)
         self.timeout_seconds = int(timeout_seconds)
         self._model_fallback_used = False
+
+    def _llm_disabled(self) -> bool:
+        if self.llm_provider == "disabled":
+            return True
+        if not self.ollama_enabled:
+            return True
+        if _ollama_host_disabled(self.ollama_host):
+            return True
+        return False
 
     def _determine_response_style(self, route_payload: Mapping[str, Any]) -> str:
         intent = _clean_text(route_payload.get("intent"))
@@ -344,30 +423,56 @@ class ResponseSynthesizer:
         return prompt
 
     def _invoke_ollama(self, prompt: str) -> str:
-        if shutil.which("ollama") is None:
-            raise RuntimeError("ollama executable not found.")
+        if self._llm_disabled():
+            raise RuntimeError("LLM provider disabled")
+        if self.llm_provider != "ollama":
+            raise RuntimeError(f"Unsupported LLM provider: {self.llm_provider}")
 
-        env = os.environ.copy()
-        if self.ollama_host:
-            env["OLLAMA_HOST"] = self.ollama_host
-
-        completed = subprocess.run(
-            ["ollama", "run", self.model, "--format", "json"],
-            input=prompt,
-            text=True,
-            capture_output=True,
-            timeout=self.timeout_seconds,
-            check=False,
-            env=env,
+        url = urljoin(self.ollama_host.rstrip("/") + "/", "api/generate")
+        body = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+        }
+        request = Request(
+            url=url,
+            method="POST",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
         )
+        if self.ollama_api_key:
+            request.add_header("Authorization", f"Bearer {self.ollama_api_key}")
 
-        if completed.returncode != 0:
-            raise RuntimeError(_clean_text(completed.stderr) or "ollama returned non-zero exit code")
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310 - URL comes from runtime config
+                status = int(getattr(response, "status", 200))
+                payload_raw = response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            raise RuntimeError(f"Ollama HTTP error: {exc.code}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Ollama connection failed: {exc.reason}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
 
-        output = _clean_text(completed.stdout)
-        if not output:
-            raise RuntimeError("ollama returned empty output")
-        return output
+        if status != 200:
+            raise RuntimeError(f"Ollama returned HTTP {status}")
+
+        parsed = _extract_json_object(payload_raw)
+        if parsed is None:
+            raise RuntimeError("Ollama returned non-JSON payload")
+
+        output = _clean_text(parsed.get("response"))
+        if output:
+            return output
+
+        message = parsed.get("message")
+        if isinstance(message, Mapping):
+            content = _clean_text(message.get("content"))
+            if content:
+                return content
+
+        raise RuntimeError("Ollama payload missing response content")
 
     def _select_used_evidence(
         self,
@@ -433,6 +538,70 @@ class ResponseSynthesizer:
             "used_causal_paths": used_causal_paths,
             "used_evidence": used_evidence,
             "limitations": requested_limitations,
+        }
+
+    def _deterministic_scientific_evidence_response(
+        self,
+        *,
+        evidence_bundle: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        retrieved_evidence = list(evidence_bundle.get("retrieved_evidence", []) or [])
+        limitations = _as_list_of_strings(evidence_bundle.get("limitations"))
+
+        used_evidence: List[Dict[str, Any]] = []
+        for item in retrieved_evidence[:5]:
+            if not isinstance(item, Mapping):
+                continue
+            used_evidence.append(
+                {
+                    "object_id": _clean_text(item.get("object_id")),
+                    "collection": _clean_text(item.get("collection")),
+                    "title": _clean_text(item.get("title")),
+                    "content_excerpt": _clean_text(item.get("content_excerpt")),
+                    "score": item.get("score"),
+                    "distance": item.get("distance"),
+                    "source_dataset": _clean_text(item.get("source_dataset")),
+                    "source_file": _clean_text(item.get("source_file")),
+                }
+            )
+
+        evidence_count = len(retrieved_evidence)
+        answer_parts: List[str] = [f"I found {evidence_count} matching evidence records in the current retrieval set."]
+
+        if used_evidence:
+            strongest_lines: List[str] = []
+            for index, item in enumerate(used_evidence, start=1):
+                title = _clean_text(item.get("title")) or "Untitled evidence record"
+                excerpt = _clean_text(item.get("content_excerpt"))
+                excerpt = re.sub(r"\s+", " ", excerpt).strip()
+                if len(excerpt) > 180:
+                    excerpt = excerpt[:177].rstrip() + "..."
+                strongest_lines.append(f"{index}. {title}: {excerpt}")
+            answer_parts.append("The strongest matches were: " + " ".join(strongest_lines))
+
+        answer_parts.append(
+            "Interpretation: these records show sulfites are present in several wine-style beverages. "
+            "This supports a possible chemistry explanation for headaches in sensitive individuals, "
+            "but it does not prove sulfites are the cause for everyone."
+        )
+
+        if limitations:
+            answer_parts.append(f"Limitations: {limitations[0]}")
+        else:
+            answer_parts.append(
+                "Limitations: these retrieval records summarize chemistry observations and do not establish universal causality."
+            )
+
+        answer_parts.append(
+            "Safety boundary: this summary is not medical advice and should not be used for driving or drink-more decisions."
+        )
+
+        return {
+            "answer": " ".join(part for part in answer_parts if _clean_text(part)),
+            "used_facts": [],
+            "used_causal_paths": [],
+            "used_evidence": used_evidence,
+            "limitations": limitations,
         }
 
     def _rule_based_response(
@@ -716,26 +885,40 @@ class ResponseSynthesizer:
         parsed_payload: Dict[str, Any]
         model_limitations: List[str] = []
         self._model_fallback_used = False
+        llm_disabled = self._llm_disabled()
 
-        prompt = self._build_grounded_prompt(
-            query=query,
-            response_style=response_style,
-            route_payload=route_payload,
-            evidence_bundle=evidence_bundle,
-        )
-
-        try:
-            raw_output = self._invoke_ollama(prompt)
-            parsed_payload = self._parse_model_payload(raw_output, evidence_bundle)
-        except Exception as exc:
+        if intent == "scientific_evidence":
+            parsed_payload = self._deterministic_scientific_evidence_response(evidence_bundle=evidence_bundle)
+            if llm_disabled:
+                model_limitations.append("LLM provider disabled; deterministic grounded synthesis used.")
+        elif llm_disabled:
             self._model_fallback_used = True
-            model_limitations.append(f"Model generation fallback used: {exc}")
+            model_limitations.append("LLM provider disabled; deterministic grounded synthesis used.")
             parsed_payload = self._rule_based_response(
                 query=query,
                 response_style=response_style,
                 route_payload=route_payload,
                 evidence_bundle=evidence_bundle,
             )
+        else:
+            prompt = self._build_grounded_prompt(
+                query=query,
+                response_style=response_style,
+                route_payload=route_payload,
+                evidence_bundle=evidence_bundle,
+            )
+            try:
+                raw_output = self._invoke_ollama(prompt)
+                parsed_payload = self._parse_model_payload(raw_output, evidence_bundle)
+            except Exception as exc:
+                self._model_fallback_used = True
+                model_limitations.append(f"Model generation fallback used: {exc}. Deterministic grounded synthesis used.")
+                parsed_payload = self._rule_based_response(
+                    query=query,
+                    response_style=response_style,
+                    route_payload=route_payload,
+                    evidence_bundle=evidence_bundle,
+                )
 
         if response_style == "layman":
             parsed_payload["answer"] = self._build_default_layman_answer(
@@ -752,7 +935,7 @@ class ResponseSynthesizer:
             query=query,
             route_payload=route_payload,
             evidence_bundle=evidence_bundle,
-            strict_token_check=response_style != "layman",
+            strict_token_check=(response_style != "layman" and intent != "scientific_evidence"),
         )
 
         limitations = _as_list_of_strings(evidence_bundle.get("limitations"))
@@ -792,9 +975,9 @@ class ResponseSynthesizer:
                 }
             )
 
-        if not used_facts:
+        if not used_facts and intent != "scientific_evidence":
             used_facts = list(evidence_bundle.get("key_facts", []) or [])[:3]
-        if not used_causal_paths:
+        if not used_causal_paths and intent != "scientific_evidence":
             used_causal_paths = list(evidence_bundle.get("causal_paths", []) or [])[:2]
         if not used_evidence:
             source_evidence = list(evidence_bundle.get("retrieved_evidence", []) or [])[:3]

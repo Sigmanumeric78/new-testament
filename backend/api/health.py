@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import socket
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
@@ -34,6 +34,17 @@ def _clean_text(value: Any) -> str:
     if lowered in {"none", "null", "nan"}:
         return ""
     return text
+
+
+def _bool_from_text(value: Any, default: bool = True) -> bool:
+    text = _clean_text(value).lower()
+    if not text:
+        return bool(default)
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 def _component(ok: bool, detail: str) -> Dict[str, Any]:
@@ -71,21 +82,53 @@ def _neo4j_probe() -> Dict[str, Any]:
 def _weaviate_probe() -> Dict[str, Any]:
     try:
         config = get_weaviate_config()
-        parsed = urlparse(_clean_text(config.get("url")))
-        host = parsed.hostname or "localhost"
-        port = int(parsed.port or 8080)
-        return _socket_probe(host, port)
+        base_url = _clean_text(config.get("url"))
+        grpc_host = _clean_text(config.get("grpc_host")) or "localhost"
+        grpc_port = int(_clean_text(config.get("grpc_port")) or "50051")
+        api_key = _clean_text(config.get("api_key"))
+        if not base_url:
+            return _component(False, "WEAVIATE_URL is missing")
+        meta_url = urljoin(base_url.rstrip("/") + "/", "v1/meta")
+        req = Request(url=meta_url, method="GET")
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+        with urlopen(req, timeout=6) as response:  # noqa: S310 - URL comes from local env config
+            status = int(getattr(response, "status", 200))
+            _ = response.read(1024)
+        if status != 200:
+            return _component(False, f"weaviate http {status}")
+        grpc_probe = _socket_probe(grpc_host, grpc_port, timeout_seconds=2.5)
+        if not bool(grpc_probe.get("ok")):
+            return _component(True, f"ok (grpc probe failed: {_clean_text(grpc_probe.get('detail'))})")
+        return _component(True, "ok")
     except Exception as exc:
         return _component(False, str(exc))
+
+
+def _ollama_is_disabled(config: Mapping[str, Any]) -> bool:
+    provider = _clean_text(config.get("provider")).lower() or "ollama"
+    enabled = _bool_from_text(config.get("enabled"), default=True)
+    host = _clean_text(config.get("host"))
+    normalized = host.lower().rstrip("/")
+    if provider == "disabled":
+        return True
+    if not enabled:
+        return True
+    return normalized in {"", "disabled", "http://disabled", "https://disabled", "off", "none"}
 
 
 def _ollama_probe() -> Dict[str, Any]:
     try:
         config = get_ollama_config()
+        if _ollama_is_disabled(config):
+            return _component(True, "disabled")
         host = _clean_text(config.get("host")) or "http://localhost:11434"
         model = _clean_text(config.get("model"))
+        api_key = _clean_text(config.get("api_key"))
         url = urljoin(host.rstrip("/") + "/", "api/tags")
         req = Request(url=url, method="GET")
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
         with urlopen(req, timeout=4) as response:  # noqa: S310 - local host URL from config
             status = int(getattr(response, "status", 200))
             body = response.read().decode("utf-8", errors="replace")
@@ -181,7 +224,9 @@ def build_health_payload() -> Dict[str, Any]:
         components["user_risk_advisor"] = _component(False, str(exc))
 
     core_keys = ("api", "pbpk", "router", "orchestrator", "synthesizer", "grounding_guard", "user_risk_advisor")
-    external_keys = ("neo4j", "weaviate", "ollama", "artifact_status")
+    external_keys = ["neo4j", "weaviate", "artifact_status"]
+    if not _clean_text(components.get("ollama", {}).get("detail", "")).lower().startswith("disabled"):
+        external_keys.append("ollama")
 
     if any(not bool(components[key]["ok"]) for key in core_keys):
         status = "error"

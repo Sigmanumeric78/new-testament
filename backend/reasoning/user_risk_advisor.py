@@ -1008,31 +1008,40 @@ def build_user_risk_advice(
     )
 
     if detail_level == "scientific" and not emergency:
-        scientific_intro_parts: List[str] = [
-            "Based on the supplied inputs, the model estimates your current alcohol exposure and impairment risk."
-        ]
-        if comparison_harder_query:
+        scientific_intro_parts: List[str] = []
+        if source_answer:
+            scientific_intro_parts.append(source_answer)
+        else:
             scientific_intro_parts.append(
-                "Whisky often produces a faster and higher intoxication signal than beer because of higher ABV and ethanol dose per volume."
+                "Based on the supplied inputs, the model estimates your current alcohol exposure and impairment risk."
             )
-        if wine_headache_query:
-            scientific_intro_parts.append(
-                "For wine-related headaches, likely contributors include sulfites, histamine, tyramine, congeners, and polyphenols in sensitive people."
-            )
-        if sulfite_research_query:
-            scientific_intro_parts.append(
-                "Sulfite-related headache evidence is variable and can depend on individual sensitivity."
-            )
-            if not evidence_signal:
-                scientific_intro_parts.append("Some supporting evidence was unavailable.")
+            if comparison_harder_query:
+                scientific_intro_parts.append(
+                    "Whisky often produces a faster and higher intoxication signal than beer because of higher ABV and ethanol dose per volume."
+                )
+            if wine_headache_query:
+                scientific_intro_parts.append(
+                    "For wine-related headaches, likely contributors include sulfites, histamine, tyramine, congeners, and polyphenols in sensitive people."
+                )
+            if sulfite_research_query:
+                scientific_intro_parts.append(
+                    "Sulfite-related headache evidence is variable and can depend on individual sensitivity."
+                )
+                if not evidence_signal:
+                    scientific_intro_parts.append("Some supporting evidence was unavailable.")
+        if scientific_query and evidence_signal and evidence_signal not in source_answer:
+            scientific_intro_parts.append(f"Top evidence titles: {evidence_signal}.")
         if estimated_peak_bac is not None:
             direction = "below" if estimated_peak_bac < legal_limit_reference_bac else "at or above"
             scientific_intro_parts.append(
                 f"Estimated peak BAC is about {_display_bac(estimated_peak_bac)}%, which is {direction} {legal_limit_reference_bac:.2f}%."
             )
-        scientific_intro_parts.append(
-            "The structured sections below show dose, 0.08% threshold context, likely drink chemistry, body-processing stages, assumptions, and safety boundaries."
-        )
+        if threshold_explanation:
+            scientific_intro_parts.append(threshold_explanation)
+        if not source_answer:
+            scientific_intro_parts.append(
+                "The structured sections below show dose, 0.08% threshold context, likely drink chemistry, body-processing stages, assumptions, and safety boundaries."
+            )
         plain_answer = _sanitize_plain_text(" ".join(scientific_intro_parts), mode=detail_level)
 
     if detail_level == "technical" and not emergency:
