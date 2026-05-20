@@ -16,6 +16,11 @@ def test_dockerfile_exists() -> None:
     assert path.exists()
 
 
+def test_lambda_dockerfile_exists() -> None:
+    path = BACKEND_ROOT / "Dockerfile.lambda"
+    assert path.exists()
+
+
 def test_frontend_dockerfile_and_nginx_exist() -> None:
     frontend_dockerfile = MONOREPO_ROOT / "frontend/Dockerfile"
     frontend_nginx = MONOREPO_ROOT / "frontend/nginx.conf"
@@ -40,6 +45,28 @@ def test_dockerfile_copies_only_manifest_from_data() -> None:
     assert "COPY data /app/data" not in text
 
 
+def test_lambda_dockerfile_copies_only_manifest_from_data() -> None:
+    text = _read(BACKEND_ROOT / "Dockerfile.lambda")
+    assert "COPY data/artifact_manifest.example.json /app/data/artifact_manifest.example.json" in text
+    assert "COPY data/ /app/data" not in text
+    assert "COPY data /app/data" not in text
+
+
+def test_lambda_dockerfile_includes_lambda_web_adapter() -> None:
+    text = _read(BACKEND_ROOT / "Dockerfile.lambda")
+    assert "public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1" in text
+    assert "/opt/extensions/lambda-adapter" in text
+
+
+def test_lambda_dockerfile_sets_tmp_data_root_defaults() -> None:
+    text = _read(BACKEND_ROOT / "Dockerfile.lambda")
+    assert "DATA_ROOT=/tmp/data" in text
+    assert "RESTORE_WORKSPACE_DIR=/tmp/restore" in text
+    assert "PROJECT_ROOT=/app" in text
+    assert "PORT=8000" in text
+    assert "CMD [\"uvicorn\", \"backend.api.main:app\"" in text
+
+
 def test_dockerfile_has_restore_startup_entrypoint_and_env_defaults() -> None:
     text = _read(BACKEND_ROOT / "Dockerfile")
     assert "ENTRYPOINT [\"bash\", \"/app/backend/docker-entrypoint.sh\"]" in text
@@ -59,6 +86,13 @@ def test_docker_entrypoint_exists_and_runs_restore_commands() -> None:
     assert "--execute" in text
     assert "--overwrite" in text
     assert "--runtime-only" in text
+
+
+def test_lambda_entrypoint_compatible_restore_vars() -> None:
+    text = _read(BACKEND_ROOT / "docker-entrypoint.sh")
+    assert "DATA_ROOT=" in text
+    assert "RESTORE_WORKSPACE_DIR=" in text
+    assert "RESTORE_ARTIFACTS_ON_STARTUP" in text
 
 
 def test_dockerignore_excludes_data_raw_and_embeddings() -> None:

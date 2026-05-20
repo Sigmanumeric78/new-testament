@@ -14,6 +14,11 @@ export DATA_ROOT
 export PYTHONPATH
 export RESTORE_WORKSPACE_DIR
 
+mkdir -p "${DATA_ROOT}"
+if [[ -f "/app/data/artifact_manifest.example.json" ]]; then
+  cp -f "/app/data/artifact_manifest.example.json" "${DATA_ROOT}/artifact_manifest.example.json"
+fi
+
 if [[ "${RESTORE_ARTIFACTS_ON_STARTUP,,}" == "true" ]]; then
   echo "[artifact-restore] restore started"
   echo "[artifact-restore] release=${ARTIFACT_RELEASE}"
