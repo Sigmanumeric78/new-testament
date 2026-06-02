@@ -23,7 +23,7 @@ export default function SafetyGuidance({
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {item('Driving guidance', drivingGuidance, 'warning')}
-      {item('Continue drinking guidance', continueGuidance, 'warning')}
+      {item('Continue intake guidance', continueGuidance, 'warning')}
       {item('Hydration', hydrationGuidance)}
       {item('Food', foodGuidance)}
       <div className="md:col-span-2">{item('Medical warning', medicalWarning, 'warning')}</div>

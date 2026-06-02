@@ -74,7 +74,7 @@ describe('ResultPanel', () => {
 
   it('shows high risk prominently', () => {
     render(<ResultPanel result={makeResult({ risk_level: 'high' })} debugEnabled={false} />)
-    expect(screen.getByText(/risk level: high/i)).toBeInTheDocument()
+    expect(screen.getByText(/risk signal: high/i)).toBeInTheDocument()
   })
 
   it('shows emergency warning prominently for possible_medical_emergency', () => {
@@ -88,7 +88,7 @@ describe('ResultPanel', () => {
       />,
     )
 
-    expect(screen.getByText(/risk level: possible medical emergency/i)).toBeInTheDocument()
+    expect(screen.getByText(/risk signal: possible medical emergency/i)).toBeInTheDocument()
     expect(screen.getByText(/emergency warning: seek immediate medical help/i)).toBeInTheDocument()
   })
 
@@ -112,7 +112,7 @@ describe('ResultPanel', () => {
       />,
     )
 
-    expect(screen.getByText(/conservative safety fallback response was used/i)).toBeInTheDocument()
+    expect(screen.getByText(/conservative safety response shown/i)).toBeInTheDocument()
     expect(screen.queryByText(/grounding score below threshold/i)).not.toBeInTheDocument()
   })
 
@@ -140,8 +140,8 @@ describe('ResultPanel', () => {
     expect(screen.getByText(/mode: scientific/i)).toBeInTheDocument()
     expect(screen.getByText(/estimated alcohol dose/i)).toBeInTheDocument()
     expect(screen.getByText(/drink chemistry/i)).toBeInTheDocument()
-    expect(screen.getByText(/what is happening in your body/i)).toBeInTheDocument()
-    expect(screen.getByText(/0.08% threshold context/i)).toBeInTheDocument()
+    expect(screen.getByText(/why this matters/i)).toBeInTheDocument()
+    expect(screen.getByText(/risk threshold context/i)).toBeInTheDocument()
   })
 
   it('does not render chemistry/process sections in layman mode', () => {
@@ -159,12 +159,12 @@ describe('ResultPanel', () => {
     expect(screen.getByText(/mode: simple/i)).toBeInTheDocument()
     expect(screen.queryByText(/estimated alcohol dose/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/drink chemistry/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/what is happening in your body/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/why this matters/i)).not.toBeInTheDocument()
   })
 
   it('renders threshold context section when threshold fields exist', () => {
     render(<ResultPanel result={makeResult()} debugEnabled={false} />)
-    expect(screen.getByText(/0.08% threshold context/i)).toBeInTheDocument()
+    expect(screen.getByText(/risk threshold context/i)).toBeInTheDocument()
     expect(screen.getByText(/this is not a recommendation or a safe drinking limit/i)).toBeInTheDocument()
     expect(screen.getByText(/reference threshold: 0.08%/i)).toBeInTheDocument()
   })
@@ -181,6 +181,6 @@ describe('ResultPanel', () => {
         debugEnabled={false}
       />,
     )
-    expect(screen.queryByText(/0.08% threshold context/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/risk threshold context/i)).not.toBeInTheDocument()
   })
 })

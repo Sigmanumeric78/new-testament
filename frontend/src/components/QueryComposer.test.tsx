@@ -62,7 +62,7 @@ describe('QueryComposer', () => {
 
   it('submits when form is valid', async () => {
     const { onSubmit } = renderComposer()
-    await userEvent.click(screen.getByRole('button', { name: /run check/i }))
+    await userEvent.click(screen.getByRole('button', { name: /start health check/i }))
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 })

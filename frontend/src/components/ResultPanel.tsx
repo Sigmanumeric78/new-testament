@@ -31,28 +31,36 @@ export default function ResultPanel({ result, debugEnabled }: ResultPanelProps) 
   return (
     <section className="space-y-4" aria-live="polite">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Mode: {modeLabel}</p>
-        <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Answer</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-lg font-semibold text-slate-950">Summary Answer</h3>
+          <p className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">Mode: {modeLabel}</p>
+        </div>
         <p className="mt-2 text-sm leading-relaxed text-slate-900">{safeResult.answer}</p>
       </div>
 
-      {(safeResult.advisor_fallback_used || safeResult.synthesis_blocked) && (
+      {safeResult.advisor_fallback_used && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          A conservative safety fallback response was used.
+          Conservative safety response shown because some inputs or evidence were incomplete.
         </div>
       )}
 
-      <RiskCard riskLevel={safeResult.risk_level} summary={safeResult.risk_summary} />
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Risk Level</h3>
+        <RiskCard riskLevel={safeResult.risk_level} summary={safeResult.risk_summary} />
+      </div>
 
-      <EstimateCards
-        peakBac={safeResult.estimated_peak_bac}
-        timeToSober={safeResult.estimated_time_to_sober_h}
-        timeToPeak={safeResult.estimated_time_to_peak_h}
-      />
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Key Estimates</h3>
+        <EstimateCards
+          peakBac={safeResult.estimated_peak_bac}
+          timeToSober={safeResult.estimated_time_to_sober_h}
+          timeToPeak={safeResult.estimated_time_to_peak_h}
+        />
+      </div>
 
       {showThresholdSection && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <h4 className="text-sm font-semibold text-amber-900">0.08% threshold context</h4>
+          <h4 className="text-sm font-semibold text-amber-900">Risk threshold context</h4>
           <ul className="mt-2 space-y-1 text-sm text-amber-900">
             <li>Current estimate: {formatBac(safeResult.estimated_peak_bac)}</li>
             <li>Reference threshold: {safeResult.legal_limit_reference_bac?.toFixed(2)}%</li>
@@ -95,7 +103,7 @@ export default function ResultPanel({ result, debugEnabled }: ResultPanelProps) 
 
       {showDetailedSections && safeResult.body_processes.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h4 className="text-sm font-semibold text-slate-900">What is happening in your body</h4>
+          <h4 className="text-sm font-semibold text-slate-900">Why this matters</h4>
           <ul className="mt-2 space-y-2 text-sm text-slate-700">
             {safeResult.body_processes.map((process) => (
               <li key={process.stage}>
@@ -107,39 +115,51 @@ export default function ResultPanel({ result, debugEnabled }: ResultPanelProps) 
         </div>
       )}
 
-      <SafetyGuidance
-        drivingGuidance={safeResult.driving_guidance}
-        continueGuidance={safeResult.continue_drinking_guidance}
-        hydrationGuidance={safeResult.hydration_guidance}
-        foodGuidance={safeResult.food_guidance}
-        medicalWarning={safeResult.medical_warning}
-      />
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Safety Guidance</h3>
+        <SafetyGuidance
+          drivingGuidance={safeResult.driving_guidance}
+          continueGuidance={safeResult.continue_drinking_guidance}
+          hydrationGuidance={safeResult.hydration_guidance}
+          foodGuidance={safeResult.food_guidance}
+          medicalWarning={safeResult.medical_warning}
+        />
+      </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h4 className="text-sm font-semibold text-slate-900">Assumptions</h4>
-          {safeResult.assumptions.length > 0 ? (
-            <ul className="mt-2 list-disc pl-4 text-sm text-slate-700">
-              {safeResult.assumptions.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-slate-600">None.</p>
-          )}
-        </div>
+      <div>
+        <h3 className="mb-2 text-sm font-semibold uppercase text-slate-500">Assumptions & Missing Info</h3>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h4 className="text-sm font-semibold text-slate-900">Assumptions</h4>
+            {safeResult.assumptions.length > 0 ? (
+              <ul className="mt-2 list-disc pl-4 text-sm text-slate-700">
+                {safeResult.assumptions.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">None.</p>
+            )}
+          </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h4 className="text-sm font-semibold text-slate-900">Missing info</h4>
-          {safeResult.missing_info.length > 0 ? (
-            <ul className="mt-2 list-disc pl-4 text-sm text-slate-700">
-              {safeResult.missing_info.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-slate-600">None.</p>
-          )}
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h4 className="text-sm font-semibold text-slate-900">Missing info</h4>
+            {safeResult.missing_info.length > 0 ? (
+              <>
+                <p className="mt-2 text-sm text-slate-700">
+                  Some estimates are unavailable because required fields are missing. Provide sex, weight, fed state,
+                  drink type, amount, and duration for a more complete estimate.
+                </p>
+                <ul className="mt-2 list-disc pl-4 text-sm text-slate-700">
+                  {safeResult.missing_info.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">None.</p>
+            )}
+          </div>
         </div>
       </div>
 

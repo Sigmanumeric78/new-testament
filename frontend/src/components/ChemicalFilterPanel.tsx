@@ -19,8 +19,8 @@ export default function ChemicalFilterPanel({
 
       <div className="mt-3 space-y-3">
         <div>
-          <label htmlFor="chemical-class" className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Chemical class
+          <label htmlFor="chemical-class" className="block text-xs font-semibold uppercase text-slate-500">
+            Ingredient or compound class
           </label>
           <select
             id="chemical-class"

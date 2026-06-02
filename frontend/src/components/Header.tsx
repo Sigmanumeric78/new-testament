@@ -21,31 +21,31 @@ export default function Header() {
 
   function navClass(isActive: boolean): string {
     return `focus-ring rounded-lg px-3 py-2 text-sm font-semibold transition ${
-      isActive ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+      isActive ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-emerald-50'
     }`
   }
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-6 py-4 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4">
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-4 py-4 backdrop-blur md:px-6">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="Zer0 G0nd0g0l logo" className="h-[30px] w-[30px] shrink-0 object-contain" />
+          <img src="/logo.png" alt="ZER0 GONDOGOL logo" className="h-[34px] w-[34px] shrink-0 rounded-lg object-contain" />
           <div>
-            <h1 className="font-brand-anurati text-xl font-semibold tracking-tight text-slate-900">Zer0 G0nd0g0l</h1>
-            <p className="text-sm text-slate-600">Alcohol risk estimation, explained clearly.</p>
+            <h1 className="text-xl font-semibold text-slate-950">ZER0 GONDOGOL</h1>
+            <p className="text-sm text-slate-600">Food, nutrition, ingredient, and intake intelligence.</p>
           </div>
         </div>
 
-        <nav className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
+        <nav className="flex w-full items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:w-auto">
           <button type="button" onClick={() => navigate('/')} className={navClass(path === '/')}>
-            Ask
+            Health Check
           </button>
           <button
             type="button"
             onClick={() => navigate('/explorer')}
             className={navClass(path === '/explorer')}
           >
-            Chemical Explorer
+            Ingredient Explorer
           </button>
         </nav>
       </div>

@@ -17,7 +17,7 @@ export default function RiskCard({ riskLevel, summary }: RiskCardProps) {
   const label = riskLevel.split('_').join(' ')
   return (
     <section className={`rounded-xl border p-4 ${style}`} aria-live="polite">
-      <h3 className="text-sm font-semibold uppercase tracking-wide">Risk level: {label}</h3>
+      <h3 className="text-sm font-semibold uppercase">Risk signal: {label}</h3>
       <p className="mt-2 text-sm">{summary || 'Risk summary unavailable.'}</p>
       {riskLevel === 'possible_medical_emergency' && (
         <p className="mt-2 text-sm font-semibold">Emergency warning: seek immediate medical help.</p>

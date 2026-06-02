@@ -27,7 +27,7 @@ export default function HealthBadge({ health, isLoading }: HealthBadgeProps) {
       <span
         className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${cls}`}
         title={degradedDetails.join('\n')}
-        aria-label={`System health: ${label}`}
+        aria-label={`Platform status: ${label}`}
       >
         {label}
       </span>

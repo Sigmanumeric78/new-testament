@@ -85,7 +85,7 @@ describe('ChemicalExplorerPage', () => {
   it('renders explorer page and list', async () => {
     render(<ChemicalExplorerPage />)
 
-    expect(screen.getByRole('heading', { name: /chemical explorer/i, level: 1 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /ingredient explorer/i, level: 1 })).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByText('ethanol')).toBeInTheDocument()
       expect(screen.getByText('sulfite')).toBeInTheDocument()
@@ -97,7 +97,7 @@ describe('ChemicalExplorerPage', () => {
 
     await waitFor(() => expect(listChemicalsMock).toHaveBeenCalled())
 
-    await userEvent.type(screen.getByLabelText(/search compounds/i), 'ethanol')
+    await userEvent.type(screen.getByLabelText(/search ingredients or compounds/i), 'ethanol')
     await userEvent.click(screen.getByRole('button', { name: /search/i }))
 
     await waitFor(() => {
@@ -124,7 +124,7 @@ describe('ChemicalExplorerPage', () => {
     await waitFor(() => expect(getChemicalDetailMock).toHaveBeenCalled())
 
     expect(screen.getByText(/canonical smiles/i)).toBeInTheDocument()
-    expect(screen.getByText(/metabolism relevance/i)).toBeInTheDocument()
+    expect(screen.getByText(/possible relevance/i)).toBeInTheDocument()
   })
 
   it('renders 3D fallback message when conformer is missing', async () => {

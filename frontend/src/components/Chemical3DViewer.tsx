@@ -127,7 +127,7 @@ export default function Chemical3DViewer({ conformer, loading, error }: Chemical
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor="viewer-style" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <label htmlFor="viewer-style" className="text-xs font-semibold uppercase text-slate-500">
           Style
         </label>
         <select

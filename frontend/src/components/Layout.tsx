@@ -8,7 +8,7 @@ interface LayoutProps {
 
 export default function Layout({ sidebar, children }: LayoutProps) {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900">
+    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-emerald-50 text-slate-900">
       <Header />
       <div className="mx-auto flex max-w-[1600px] flex-col lg:min-h-[calc(100vh-73px)] lg:flex-row">
         {sidebar ? sidebar : null}

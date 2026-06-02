@@ -9,7 +9,7 @@ export default function ChemicalSearchBar({ value, onChange, onSubmit, loading }
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <label htmlFor="chemical-search" className="text-sm font-semibold text-slate-800">
-        Search compounds
+        Search ingredients or compounds
       </label>
       <div className="mt-2 flex flex-col gap-2 sm:flex-row">
         <input

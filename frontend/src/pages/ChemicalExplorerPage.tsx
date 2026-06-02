@@ -158,10 +158,12 @@ export default function ChemicalExplorerPage() {
   }, [selectedCompoundId])
 
   const sidebar = (
-    <aside className="w-full space-y-4 border-r border-slate-200 bg-slate-100/70 p-4 lg:w-96">
+    <aside className="w-full space-y-4 border-r border-slate-200 bg-white/65 p-4 lg:w-96">
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Chemical Explorer</h2>
-        <p className="mt-1 text-xs text-slate-600">Explore compounds, beverage coverage, and 3D conformers.</p>
+        <h2 className="text-lg font-semibold text-slate-900">Ingredient Explorer</h2>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          Explore compounds, ingredients, and food-related chemical signals.
+        </p>
       </div>
 
       <ChemicalFilterPanel
@@ -179,7 +181,7 @@ export default function ChemicalExplorerPage() {
       />
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">System health</p>
+        <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Platform Status</p>
         <HealthBadge health={health} isLoading={healthLoading} />
       </div>
     </aside>
@@ -188,10 +190,11 @@ export default function ChemicalExplorerPage() {
   return (
     <Layout sidebar={sidebar}>
       <div className="mx-auto max-w-7xl space-y-4">
-        <section className="rounded-2xl bg-gradient-to-r from-brand-50 to-white p-6">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Chemical Explorer</h1>
-          <p className="mt-1 text-sm text-slate-700">
-            Browse beverage-related compounds and view 3D conformers when available.
+        <section className="rounded-2xl border border-emerald-100 bg-gradient-to-r from-white via-sky-50 to-emerald-50 p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-slate-900">Ingredient Explorer</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-700">
+            Explore compounds, ingredients, and food-related chemical signals. This module currently includes beverage
+            and alcohol-related compounds and will expand toward broader food ingredients and additives.
           </p>
         </section>
 

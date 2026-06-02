@@ -21,7 +21,7 @@ export default function ChemicalCard({ item, selected, onSelect }: ChemicalCardP
           <p className="text-xs text-slate-600">{item.chemical_class || 'unknown'}</p>
         </div>
         <span
-          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${
             item.has_3d_conformer
               ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
               : 'border-slate-300 bg-slate-100 text-slate-600'
@@ -33,7 +33,7 @@ export default function ChemicalCard({ item, selected, onSelect }: ChemicalCardP
 
       <div className="mt-2 text-xs text-slate-600">
         <p>PubChem CID: {item.pubchem_cid ?? 'N/A'}</p>
-        <p>Beverages: {item.beverage_count}</p>
+        <p>Found in: {item.beverage_count} beverage records</p>
       </div>
     </button>
   )

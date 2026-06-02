@@ -85,21 +85,21 @@ beforeEach(() => {
 })
 
 describe('App navigation', () => {
-  it('navigates between Ask and Chemical Explorer', async () => {
+  it('navigates between Health Check and Ingredient Explorer', async () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: /ask a question/i, level: 2 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /ask a health or intake question/i, level: 2 })).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: /chemical explorer/i }))
+    await userEvent.click(screen.getByRole('button', { name: /ingredient explorer/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /chemical explorer/i, level: 1 })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: /ingredient explorer/i, level: 1 })).toBeInTheDocument()
     })
 
-    await userEvent.click(screen.getByRole('button', { name: /^ask$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^health check$/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /ask a question/i, level: 2 })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: /ask a health or intake question/i, level: 2 })).toBeInTheDocument()
     })
   })
 })

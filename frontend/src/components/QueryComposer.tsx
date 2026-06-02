@@ -30,7 +30,7 @@ export default function QueryComposer({
   return (
     <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <label htmlFor="query" className="text-sm font-semibold text-slate-800">
-        Ask about current alcohol risk
+        Ask a health or intake question
       </label>
       <textarea
         id="query"
@@ -38,7 +38,7 @@ export default function QueryComposer({
         onChange={(event) => onQueryChange(event.target.value)}
         rows={5}
         className="focus-ring w-full rounded-xl border border-slate-300 p-3 text-sm leading-relaxed"
-        placeholder="Describe what you drank, when, and what you need to decide."
+        placeholder="Ask about food products, ingredients, nutrition tradeoffs, or current intake risk."
         required
       />
 
@@ -76,7 +76,7 @@ export default function QueryComposer({
           disabled={loading || !query.trim()}
           className="focus-ring rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading ? 'Checking...' : 'Run check'}
+          {loading ? 'Checking...' : 'Start Health Check'}
         </button>
       </div>
     </form>
