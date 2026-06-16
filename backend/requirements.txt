@@ -12,3 +12,4 @@ pypdf
 pytest
 httpx
 supabase
+pymongo
