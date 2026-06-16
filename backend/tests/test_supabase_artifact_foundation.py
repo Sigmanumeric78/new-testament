@@ -472,6 +472,70 @@ def test_download_plan_runtime_only_filters_non_runtime(tmp_path: Path) -> None:
     assert plan["skipped_non_runtime_count"] == 1
 
 
+def test_runtime_only_plan_includes_chunked_scientific_embedding(tmp_path: Path) -> None:
+    release = "v0.6"
+    workspace = tmp_path / "workspace"
+    chunk_manifest_path = workspace / "chunks" / "weaviate_emb_scientific_evidence" / "chunk_manifest.json"
+    chunk_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    chunk_manifest_path.write_text(
+        json.dumps(
+            {
+                "original_path": "data/processed/weaviate/embedded/scientific_evidence_embeddings.parquet",
+                "original_size_bytes": 123,
+                "original_sha256": "abc",
+                "chunk_size_bytes": 64,
+                "chunk_count": 1,
+                "chunks": [
+                    {
+                        "part_name": "part_00000",
+                        "size_bytes": 64,
+                        "sha256": "def",
+                        "remote_path": "releases/v0.6/chunks/data/processed/weaviate/embedded/scientific_evidence_embeddings.parquet/part_00000",
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    manifest = {
+        "release_name": release,
+        "artifacts": [
+            {
+                "artifact_id": "weaviate_emb_scientific_evidence",
+                "category": "weaviate_embeddings",
+                "local_path": "data/processed/weaviate/embedded/scientific_evidence_embeddings.parquet",
+                "remote_path": "releases/v0.6/data/processed/weaviate/embedded/scientific_evidence_embeddings.parquet",
+                "required": True,
+                "available": True,
+                "sha256": "abc",
+                "upload_strategy": "chunked",
+                "chunk_count": 1,
+                "chunk_manifest_remote_path": "releases/v0.6/chunks/data/processed/weaviate/embedded/scientific_evidence_embeddings.parquet/chunk_manifest.json",
+            },
+            {
+                "artifact_id": "interim_noise",
+                "category": "validation_reports",
+                "local_path": "data/interim/reasoning/noise.json",
+                "remote_path": "releases/v0.6/data/interim/reasoning/noise.json",
+                "required": False,
+                "available": True,
+                "sha256": "xyz",
+                "upload_strategy": "direct",
+            },
+        ],
+    }
+    plan = artifact_download_supabase.compute_download_plan(
+        manifest,
+        runtime_only=True,
+        workspace_dir=workspace,
+    )
+    assert plan["selected_artifact_count"] == 1
+    assert plan["chunked_artifact_count"] == 1
+    assert plan["chunked_restore"][0]["artifact_id"] == "weaviate_emb_scientific_evidence"
+
+
 def test_execute_download_supports_overwrite_with_mock_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     release = "v0.6"
     workspace = tmp_path / "workspace"

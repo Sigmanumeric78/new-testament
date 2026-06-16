@@ -174,12 +174,16 @@ def get_ollama_config() -> Dict[str, str]:
     _load_dotenv()
     raw_host = os.getenv("OLLAMA_HOST")
     host = raw_host.strip() if raw_host is not None else "http://localhost:11434"
+    raw_model = os.getenv("OLLAMA_MODEL")
+    model = raw_model.strip() if raw_model is not None else "qwen2.5:3b"
     config = {
         "host": host,
-        "model": os.getenv("OLLAMA_MODEL", "").strip() or "qwen2.5:3b",
+        "model": model,
         "provider": os.getenv("LLM_PROVIDER", "").strip() or "ollama",
         "enabled": os.getenv("OLLAMA_ENABLED", "").strip() or "true",
         "api_key": os.getenv("OLLAMA_API_KEY", "").strip(),
+        "allow_unlisted_model": os.getenv("OLLAMA_ALLOW_UNLISTED_MODEL", "").strip() or "false",
+        "auto_select_model": os.getenv("OLLAMA_AUTO_SELECT_MODEL", "").strip() or "false",
     }
     return config
 

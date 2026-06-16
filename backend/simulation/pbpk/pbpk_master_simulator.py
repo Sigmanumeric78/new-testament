@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
@@ -142,6 +143,12 @@ def configure_logging() -> None:
 
 
 def repo_root() -> Path:
+    env_root = clean_text(os.getenv("PROJECT_ROOT"))
+    if env_root:
+        candidate = Path(env_root).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        return candidate
     current = Path(__file__).resolve()
     for parent in current.parents:
         if (parent / "backend").is_dir() and (parent / "data").exists():
@@ -152,26 +159,36 @@ def repo_root() -> Path:
     return current.parents[2]
 
 
+def data_root(root: Path) -> Path:
+    env_data = clean_text(os.getenv("DATA_ROOT"))
+    if env_data:
+        candidate = Path(env_data).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        return candidate
+    return root / "data"
+
+
 def parameter_library_path(root: Path) -> Path:
-    return root / "data" / "processed" / "pbpk" / "pbpk_parameter_library.csv"
+    return data_root(root) / "processed" / "pbpk" / "pbpk_parameter_library.csv"
 
 
 def population_modifiers_path(root: Path) -> Path:
-    return root / "data" / "processed" / "pbpk" / "population_modifiers.csv"
+    return data_root(root) / "processed" / "pbpk" / "population_modifiers.csv"
 
 
 def beverage_modifiers_path(root: Path) -> Path:
-    return root / "data" / "processed" / "pbpk" / "beverage_effect_modifiers.csv"
+    return data_root(root) / "processed" / "pbpk" / "beverage_effect_modifiers.csv"
 
 
 def default_validation_output_path(root: Path) -> Path:
-    path = root / "data" / "interim" / "pbpk" / "pbpk_simulation_validation.json"
+    path = data_root(root) / "interim" / "pbpk" / "pbpk_simulation_validation.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def default_calibration_output_path(root: Path) -> Path:
-    path = root / "data" / "interim" / "pbpk" / "pbpk_calibration_report.json"
+    path = data_root(root) / "interim" / "pbpk" / "pbpk_calibration_report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

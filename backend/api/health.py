@@ -117,6 +117,37 @@ def _ollama_is_disabled(config: Mapping[str, Any]) -> bool:
     return normalized in {"", "disabled", "http://disabled", "https://disabled", "off", "none"}
 
 
+def _build_ollama_url(host: str, endpoint: str) -> str:
+    base = _clean_text(host).rstrip("/")
+    if not base:
+        return ""
+    normalized_endpoint = _clean_text(endpoint).strip().lstrip("/")
+    if not normalized_endpoint:
+        return base
+    base_norm = _clean_text(base).lower().rstrip("/")
+    if base_norm.endswith("/api"):
+        tail = normalized_endpoint.split("/", 1)[-1]
+        return f"{base}/{tail}"
+    return urljoin(base + "/", normalized_endpoint)
+
+
+def _extract_ollama_model_names(payload: Any) -> List[str]:
+    if not isinstance(payload, Mapping):
+        return []
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return []
+    names: List[str] = []
+    for item in models:
+        if not isinstance(item, Mapping):
+            continue
+        name = _clean_text(item.get("name")) or _clean_text(item.get("model"))
+        if name:
+            names.append(name)
+    deduped = sorted(set(names))
+    return deduped
+
+
 def _ollama_probe() -> Dict[str, Any]:
     try:
         config = get_ollama_config()
@@ -124,8 +155,12 @@ def _ollama_probe() -> Dict[str, Any]:
             return _component(True, "disabled")
         host = _clean_text(config.get("host")) or "http://localhost:11434"
         model = _clean_text(config.get("model"))
+        allow_unlisted_model = _bool_from_text(config.get("allow_unlisted_model"), default=False)
+        auto_select_model = _bool_from_text(config.get("auto_select_model"), default=False)
         api_key = _clean_text(config.get("api_key"))
-        url = urljoin(host.rstrip("/") + "/", "api/tags")
+        url = _build_ollama_url(host, "api/tags")
+        if not url:
+            return _component(False, "OLLAMA_HOST is required when LLM_PROVIDER=ollama")
         req = Request(url=url, method="GET")
         if api_key:
             req.add_header("Authorization", f"Bearer {api_key}")
@@ -135,17 +170,18 @@ def _ollama_probe() -> Dict[str, Any]:
         if status != 200:
             return _component(False, f"ollama http {status}")
         payload = json.loads(body or "{}")
-        models = payload.get("models", []) if isinstance(payload, dict) else []
-        detail = "ok"
-        if model and isinstance(models, list):
-            model_names = {
-                _clean_text(item.get("name"))
-                for item in models
-                if isinstance(item, dict) and _clean_text(item.get("name"))
-            }
-            if model not in model_names:
-                detail = f"ok (model {model} not listed)"
-        return _component(True, detail)
+        model_names = _extract_ollama_model_names(payload)
+        if model:
+            if model in model_names:
+                return _component(True, "ok")
+            if allow_unlisted_model:
+                return _component(True, "ok")
+            return _component(False, f"configured model not available: {model}")
+
+        if auto_select_model and model_names:
+            return _component(True, f"ok (auto-selected model {model_names[0]})")
+
+        return _component(False, "configured model not available: <empty>")
     except Exception as exc:
         return _component(False, str(exc))
 

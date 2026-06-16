@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
+import numpy as np
 import pandas as pd
 
 try:
@@ -40,7 +41,7 @@ try:
         repo_root,
         run_simulation,
     )
-    from utils.config import get_neo4j_config, get_weaviate_config
+    from utils.config import get_data_root, get_neo4j_config, get_weaviate_config
 except ModuleNotFoundError:  # pragma: no cover - direct script execution path fix
     REPO_ROOT = Path(__file__).resolve().parents[1]
     if str(REPO_ROOT) not in sys.path:
@@ -53,11 +54,12 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution path f
         repo_root,
         run_simulation,
     )
-    from utils.config import get_neo4j_config, get_weaviate_config
+    from utils.config import get_data_root, get_neo4j_config, get_weaviate_config
 
 LOGGER = logging.getLogger("hybrid_orchestrator")
 
 TOP_K = 8
+EPS = 1e-12
 
 MODULE_KEYS: Tuple[str, ...] = ("pbpk", "neo4j", "weaviate", "toxicity")
 
@@ -180,6 +182,38 @@ TOXICITY_SIGNAL_TERMS: Tuple[str, ...] = (
     "congeners",
 )
 
+HIGH_PRIORITY_VECTOR_QUERY_TERMS: Set[str] = {
+    "acetaldehyde",
+    "congener",
+    "congeners",
+    "hangover",
+    "headache",
+    "headaches",
+    "histamine",
+    "migraine",
+    "migraines",
+    "polyphenol",
+    "polyphenols",
+    "sulfide",
+    "sulfides",
+    "sulfite",
+    "sulfites",
+    "sulphite",
+    "sulphites",
+    "tyramine",
+}
+
+GENERIC_VECTOR_QUERY_TERMS: Set[str] = {
+    "alcohol",
+    "and",
+    "evidence",
+    "research",
+    "show",
+    "study",
+    "studies",
+    "the",
+}
+
 PERSONALIZATION_MARKERS: Tuple[str, ...] = (
     "for my body",
     "my body",
@@ -211,6 +245,16 @@ class ParsedQueryInputs:
     liver_status: Optional[str]
     time_since_drinking_h: Optional[float]
     personalized_request: bool
+
+
+@dataclass(frozen=True)
+class EmbeddedVectorRow:
+    object_id: str
+    chunk_id: str
+    collection: str
+    search_text: str
+    token_set: Set[str]
+    vector: np.ndarray
 
 
 def _clean_text(value: Any) -> str:
@@ -493,6 +537,59 @@ def _score_from_metadata(metadata: Any) -> Tuple[Optional[float], Optional[float
     return raw_score, distance, certainty, float(score)
 
 
+def _parse_vector_value(value: Any) -> List[float]:
+    data = value
+    if isinstance(data, str):
+        text = _clean_text(data)
+        if not text:
+            return []
+        try:
+            data = json.loads(text)
+        except Exception:
+            return []
+    if hasattr(data, "tolist"):
+        data = data.tolist()
+    if not isinstance(data, (list, tuple)):
+        return []
+
+    vector: List[float] = []
+    for item in data:
+        try:
+            number = float(item)
+        except Exception:
+            return []
+        if np.isnan(number):
+            return []
+        vector.append(number)
+    return vector
+
+
+def _expand_query_terms(terms: Set[str]) -> Set[str]:
+    expanded = set(terms)
+    for term in list(terms):
+        if term.endswith("s") and len(term) > 3:
+            expanded.add(term[:-1])
+        else:
+            expanded.add(f"{term}s")
+    if "sulfite" in expanded or "sulfites" in expanded:
+        expanded.update({"sulphite", "sulphites", "sulfide", "sulfides"})
+    return expanded
+
+
+def _query_vector_term_weight(term: str) -> float:
+    if not term:
+        return 0.0
+    if " " in term:
+        return 3.0
+    if term in HIGH_PRIORITY_VECTOR_QUERY_TERMS:
+        return 8.0
+    if term in GENERIC_VECTOR_QUERY_TERMS:
+        return 0.25
+    if len(term) <= 2:
+        return 0.0
+    return 1.0
+
+
 def _collection_scope(intent: str) -> List[str]:
     if intent in INTENT_COLLECTION_SCOPE:
         return list(INTENT_COLLECTION_SCOPE[intent])
@@ -625,6 +722,8 @@ class HybridOrchestrator:
         self.low_confidence_threshold = float(low_confidence_threshold)
         self._pbpk_sources: Optional[Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = None
         self._embedded_cache: Dict[str, pd.DataFrame] = {}
+        self._embedded_vector_cache: Dict[str, List[EmbeddedVectorRow]] = {}
+        self._query_vector_cache: Dict[Tuple[str, Tuple[str, ...]], Tuple[List[float], Dict[str, Any]]] = {}
 
     def _load_pbpk_sources(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         if self._pbpk_sources is None:
@@ -1090,8 +1189,8 @@ class HybridOrchestrator:
             )
 
     def _embedded_corpus_path(self, collection: str) -> Path:
-        root = repo_root()
-        return root / "data" / "processed" / "weaviate" / "embedded" / WEAVIATE_EMBEDDED_PARQUET[collection]
+        data_root = get_data_root()
+        return data_root / "processed" / "weaviate" / "embedded" / WEAVIATE_EMBEDDED_PARQUET[collection]
 
     def _load_embedded_collection_df(self, collection: str) -> pd.DataFrame:
         if collection in self._embedded_cache:
@@ -1124,6 +1223,152 @@ class HybridOrchestrator:
         self._embedded_cache[collection] = compact
         return compact
 
+    def _load_embedded_vector_rows(self, collection: str) -> List[EmbeddedVectorRow]:
+        if collection in self._embedded_vector_cache:
+            return self._embedded_vector_cache[collection]
+
+        path = self._embedded_corpus_path(collection)
+        if not path.exists():
+            raise FileNotFoundError(f"Embedded corpus file not found: {path}")
+
+        df = pd.read_parquet(path)
+        if "embedding" not in df.columns:
+            raise ValueError(f"Embedded corpus file has no embedding column: {path}")
+
+        rows: List[EmbeddedVectorRow] = []
+        expected_dimension = 0
+        for _, row in df.iterrows():
+            vector_values = _parse_vector_value(row.get("embedding"))
+            if not vector_values:
+                continue
+            vector = np.asarray(vector_values, dtype=float)
+            if expected_dimension == 0:
+                expected_dimension = int(vector.shape[0])
+            elif int(vector.shape[0]) != expected_dimension:
+                raise ValueError(
+                    f"Embedding dimension mismatch in {collection}: expected {expected_dimension}, got {vector.shape[0]}"
+                )
+
+            title = _clean_text(row.get("title"))
+            content = _clean_text(row.get("content"))
+            metadata_raw = _clean_text(row.get("metadata"))
+            provenance_raw = _clean_text(row.get("provenance"))
+            search_text = " ".join([title, content, metadata_raw, provenance_raw]).strip()
+            rows.append(
+                EmbeddedVectorRow(
+                    object_id=_clean_text(row.get("object_id")),
+                    chunk_id=_clean_text(row.get("chunk_id")),
+                    collection=_clean_text(row.get("collection")) or collection,
+                    search_text=_normalize_text(search_text),
+                    token_set=_tokenize(search_text),
+                    vector=vector,
+                )
+            )
+
+        if not rows:
+            raise ValueError(f"No usable embedded vectors found in {path}")
+
+        self._embedded_vector_cache[collection] = rows
+        return rows
+
+    def _available_vector_rows(self, collections: Sequence[str]) -> Tuple[List[EmbeddedVectorRow], int]:
+        rows: List[EmbeddedVectorRow] = []
+        for collection in collections:
+            try:
+                rows.extend(self._load_embedded_vector_rows(collection))
+            except FileNotFoundError:
+                continue
+
+        if not rows and "ScientificEvidence" not in collections:
+            try:
+                rows.extend(self._load_embedded_vector_rows("ScientificEvidence"))
+            except FileNotFoundError:
+                pass
+
+        if not rows:
+            raise FileNotFoundError("No embedded vector corpus available for query-vector generation.")
+
+        dimensions = {int(row.vector.shape[0]) for row in rows}
+        if len(dimensions) != 1:
+            raise ValueError(f"Embedded vector dimension mismatch across collections: {sorted(dimensions)}")
+        dimension = int(next(iter(dimensions)))
+        if dimension <= 0:
+            raise ValueError("Embedded vector dimension must be positive.")
+        return rows, dimension
+
+    def _build_query_vector(
+        self,
+        search_query: str,
+        collections: Sequence[str],
+    ) -> Tuple[List[float], Dict[str, Any]]:
+        cache_key = (_normalize_text(search_query), tuple(sorted(collections)))
+        if cache_key in self._query_vector_cache:
+            return self._query_vector_cache[cache_key]
+
+        rows, dimension = self._available_vector_rows(collections)
+        query_tokens = _expand_query_terms(_tokenize(search_query))
+        query_phrase = _normalize_text(search_query)
+        terms = {term for term in query_tokens if term}
+        if query_phrase:
+            terms.add(query_phrase)
+
+        candidates: List[Tuple[float, str, str, str, np.ndarray]] = []
+        for row in rows:
+            overlap = 0.0
+            for term in terms:
+                weight = _query_vector_term_weight(term)
+                if weight <= 0.0:
+                    continue
+                if " " in term:
+                    if term in row.search_text:
+                        overlap += weight
+                elif term in row.token_set:
+                    overlap += weight
+            if overlap > 0:
+                candidates.append((overlap, row.collection, row.chunk_id, row.object_id, row.vector))
+
+        if candidates:
+            ordered = sorted(candidates, key=lambda item: (-item[0], item[1], item[2], item[3]))
+            max_score = float(ordered[0][0])
+            if max_score >= 4.0:
+                focused = [item for item in ordered if float(item[0]) >= max_score - EPS]
+                selected = focused[:300]
+            else:
+                selected = ordered[:3000]
+            weights = np.asarray([float(item[0]) for item in selected], dtype=float)
+            matrix = np.vstack([item[4] for item in selected])
+            vector = np.average(matrix, axis=0, weights=weights)
+            source = "embedded_corpus_weighted_average"
+            seed_rows = len(selected)
+            max_overlap = float(selected[0][0])
+        else:
+            selected_rows = sorted(rows, key=lambda item: (item.collection, item.chunk_id, item.object_id))[:2000]
+            matrix = np.vstack([item.vector for item in selected_rows])
+            vector = np.mean(matrix, axis=0)
+            source = "embedded_corpus_fallback_average"
+            seed_rows = len(selected_rows)
+            max_overlap = 0.0
+
+        if int(vector.shape[0]) != dimension:
+            raise ValueError(f"Query vector dimension mismatch: expected {dimension}, got {vector.shape[0]}")
+
+        norm = float(np.linalg.norm(vector))
+        if norm > EPS:
+            vector = vector / norm
+
+        result = (
+            [float(value) for value in vector.tolist()],
+            {
+                "query_vector_source": source,
+                "query_vector_dimension": dimension,
+                "query_vector_seed_rows": int(seed_rows),
+                "query_vector_seed_overlap_max": round(float(max_overlap), 6),
+                "embedding_model_reference": "nomic-ai/nomic-embed-text-v1",
+            },
+        )
+        self._query_vector_cache[cache_key] = result
+        return result
+
     def _embedded_fallback_search(
         self,
         query: str,
@@ -1137,7 +1382,10 @@ class HybridOrchestrator:
         candidates: List[Dict[str, Any]] = []
 
         for collection in collections:
-            df = self._load_embedded_collection_df(collection)
+            try:
+                df = self._load_embedded_collection_df(collection)
+            except FileNotFoundError:
+                continue
             for _, row in df.iterrows():
                 object_id = _clean_text(row.get("object_id"))
                 title = _clean_text(row.get("title"))
@@ -1213,7 +1461,11 @@ class HybridOrchestrator:
             config = get_weaviate_config()
         except Exception as exc:
             limitations.append(f"Weaviate config unavailable: {exc}")
-            hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            try:
+                hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            except Exception as embedded_exc:
+                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
+                hits = []
             hits, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=hits, top_k=TOP_K)
             if low_relevance:
                 limitations.append("Some supporting evidence was unavailable.")
@@ -1231,7 +1483,11 @@ class HybridOrchestrator:
 
         if weaviate is None:
             limitations.append("Weaviate client unavailable; used embedded fallback retrieval.")
-            hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            try:
+                hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            except Exception as embedded_exc:
+                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
+                hits = []
             hits, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=hits, top_k=TOP_K)
             if low_relevance:
                 limitations.append("Some supporting evidence was unavailable.")
@@ -1249,10 +1505,13 @@ class HybridOrchestrator:
 
         client = None
         hits: List[Dict[str, Any]] = []
+        query_vector_details: Dict[str, Any] = {}
         try:
             client = self._connect_weaviate(config)
             if not bool(client.is_ready()):
                 raise RuntimeError("Weaviate is reachable but is_ready() returned False.")
+
+            query_vector, query_vector_details = self._build_query_vector(search_query, collections)
 
             metadata_query = None
             if MetadataQuery is not None:
@@ -1264,8 +1523,8 @@ class HybridOrchestrator:
                     continue
 
                 collection = client.collections.get(collection_name)
-                response = collection.query.hybrid(
-                    query=search_query,
+                response = collection.query.near_vector(
+                    near_vector=query_vector,
                     limit=TOP_K,
                     return_metadata=metadata_query,
                     return_properties=[
@@ -1328,10 +1587,14 @@ class HybridOrchestrator:
 
             if not deduped:
                 limitations.append("Weaviate returned zero hits; used embedded fallback retrieval.")
-                deduped = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+                try:
+                    deduped = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+                except Exception as embedded_exc:
+                    limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
+                    deduped = []
                 backend = "embedded_fallback"
             else:
-                backend = "weaviate"
+                backend = "weaviate_near_vector"
 
             deduped, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=deduped, top_k=TOP_K)
             if low_relevance:
@@ -1345,12 +1608,17 @@ class HybridOrchestrator:
                     "collections_searched": collections,
                     "hit_count": len(deduped),
                     "hits": deduped,
+                    **query_vector_details,
                 },
                 limitations,
             )
         except Exception as exc:
             limitations.append(f"Weaviate query failed; used embedded fallback retrieval: {exc}")
-            fallback_hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            try:
+                fallback_hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            except Exception as embedded_exc:
+                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
+                fallback_hits = []
             fallback_hits, low_relevance = _filter_relevant_hits(
                 intent=intent,
                 query=query,

@@ -26,6 +26,7 @@ RUNTIME_REQUIRED_CATEGORIES = {
 RUNTIME_REQUIRED_ARTIFACT_IDS = {
     "neo4j_graph_schema_design",
     "weaviate_schema_design",
+    "weaviate_emb_scientific_evidence",
 }
 RUNTIME_EXCLUDED_PREFIXES = (
     "data/interim/",

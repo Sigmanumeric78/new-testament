@@ -146,6 +146,7 @@ def _build_user_response(
     if synthesis_blocked and not blocked_synthesis_reasons:
         blocked_synthesis_reasons = ["Synthesis blocked by grounding/safety guard."]
     advisor_fallback_used = bool(synthesis_blocked and advice_safe)
+    generation_fallback_used = bool(synthesis.get("generation_fallback_used"))
     final_safe_for_display = bool(advice_safe)
 
     if not final_safe_for_display and blocked_request_type is None:
@@ -210,6 +211,7 @@ def _build_user_response(
         ],
         "safe_for_display": final_safe_for_display,
         "advisor_fallback_used": advisor_fallback_used,
+        "generation_fallback_used": generation_fallback_used,
         "synthesis_blocked": synthesis_blocked,
         "blocked_synthesis_reasons": blocked_synthesis_reasons,
         "blocked_request_type": blocked_request_type,

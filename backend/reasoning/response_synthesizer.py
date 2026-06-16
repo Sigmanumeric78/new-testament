@@ -39,6 +39,13 @@ MANDATORY_SAFETY_NOTES: Tuple[str, ...] = (
 )
 
 TOXICITY_SAFETY_NOTE = "Seek medical help for severe symptoms."
+STANDARD_SAFETY_BOILERPLATE_PATTERNS: Tuple[str, ...] = (
+    r"\bdo not drive(?: or operate machinery)?(?: right now)?\b",
+    r"\bdo not use this app to decide whether to drink more\b",
+    r"\bwater can help dehydration, but it will not make alcohol leave your body faster\b",
+    r"\bthis app cannot determine legal or actual driving safety\b",
+    r"\bif you may need to drive, do not rely on this estimate\b",
+)
 
 SUPPORTED_INTENTS_FOR_TOXICITY_NOTE: Tuple[str, ...] = ("toxicity_risk",)
 
@@ -202,6 +209,29 @@ GENERIC_ALLOWED_TOKENS: Set[str] = {
     "dessert",
     "table",
     "sparkling",
+    "medical",
+    "advice",
+    "legal",
+    "driving",
+    "drive",
+    "machinery",
+    "dehydration",
+    "water",
+    "clearance",
+    "clear",
+    "operate",
+    "reaction",
+    "judgment",
+    "coordination",
+    "hours",
+    "sober",
+    "peak",
+    "bac",
+    "estimate",
+    "estimated",
+    "conservative",
+    "guidance",
+    "symptoms",
 }
 
 UNSAFE_PATTERNS: Tuple[Tuple[str, str], ...] = (
@@ -308,6 +338,36 @@ def _ollama_host_disabled(host: str) -> bool:
     return normalized in {"", "disabled", "http://disabled", "https://disabled", "none", "off"}
 
 
+def _build_ollama_url(host: str, endpoint: str) -> str:
+    base = _clean_text(host).rstrip("/")
+    if not base:
+        return ""
+    normalized_endpoint = _clean_text(endpoint).strip().lstrip("/")
+    if not normalized_endpoint:
+        return base
+    base_norm = _normalize_text(base).rstrip("/")
+    if base_norm.endswith("/api"):
+        tail = normalized_endpoint.split("/", 1)[-1]
+        return f"{base}/{tail}"
+    return urljoin(base + "/", normalized_endpoint)
+
+
+def _extract_ollama_model_names(payload: Any) -> List[str]:
+    if not isinstance(payload, Mapping):
+        return []
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return []
+    names: List[str] = []
+    for item in models:
+        if not isinstance(item, Mapping):
+            continue
+        name = _clean_text(item.get("name")) or _clean_text(item.get("model"))
+        if name:
+            names.append(name)
+    return sorted(set(names))
+
+
 def _json_safe(payload: Mapping[str, Any]) -> bool:
     try:
         json.dumps(payload, sort_keys=True)
@@ -336,13 +396,19 @@ class ResponseSynthesizer:
         timeout_seconds: int = 30,
     ) -> None:
         ollama_config = get_ollama_config()
-        self.model = _clean_text(model) or OLLAMA_MODEL
+        self.model = _clean_text(ollama_config.get("model"))
+        if "model" not in ollama_config:
+            self.model = _clean_text(model) or OLLAMA_MODEL
         self.ollama_host = _clean_text(ollama_config.get("host"))
         self.ollama_api_key = _clean_text(ollama_config.get("api_key"))
         self.llm_provider = _normalize_text(ollama_config.get("provider")) or "ollama"
         self.ollama_enabled = _bool_from_text(ollama_config.get("enabled"), default=True)
+        self.allow_unlisted_model = _bool_from_text(ollama_config.get("allow_unlisted_model"), default=False)
+        self.auto_select_model = _bool_from_text(ollama_config.get("auto_select_model"), default=False)
         self.timeout_seconds = int(timeout_seconds)
         self._model_fallback_used = False
+        self._resolved_model: Optional[str] = None
+        self._available_models: Optional[List[str]] = None
 
     def _llm_disabled(self) -> bool:
         if self.llm_provider == "disabled":
@@ -352,6 +418,66 @@ class ResponseSynthesizer:
         if _ollama_host_disabled(self.ollama_host):
             return True
         return False
+
+    def _ollama_request(self, *, endpoint: str, method: str, body: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        url = _build_ollama_url(self.ollama_host, endpoint)
+        if not url:
+            raise RuntimeError("OLLAMA_HOST is required when LLM_PROVIDER=ollama")
+        payload = None
+        headers = {"Content-Type": "application/json"}
+        if body is not None:
+            payload = json.dumps(body).encode("utf-8")
+        request = Request(url=url, method=method, data=payload, headers=headers)
+        if self.ollama_api_key:
+            request.add_header("Authorization", f"Bearer {self.ollama_api_key}")
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310 - URL comes from runtime config
+                status = int(getattr(response, "status", 200))
+                response_raw = response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            raise RuntimeError(f"Ollama HTTP error: {exc.code}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Ollama connection failed: {exc.reason}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc
+        if status != 200:
+            raise RuntimeError(f"Ollama returned HTTP {status}")
+        parsed = _extract_json_object(response_raw)
+        if parsed is not None:
+            return parsed
+        try:
+            decoded = json.loads(response_raw)
+            if isinstance(decoded, dict):
+                return decoded
+        except Exception:
+            pass
+        raise RuntimeError("Ollama returned non-JSON payload")
+
+    def _fetch_available_models(self) -> List[str]:
+        if self._available_models is not None:
+            return list(self._available_models)
+        payload = self._ollama_request(endpoint="api/tags", method="GET")
+        models = _extract_ollama_model_names(payload)
+        self._available_models = list(models)
+        return list(models)
+
+    def _resolve_generation_model(self) -> str:
+        if self._resolved_model:
+            return self._resolved_model
+
+        available_models = self._fetch_available_models()
+        configured_model = _clean_text(self.model)
+        if configured_model:
+            if configured_model in available_models or self.allow_unlisted_model:
+                self._resolved_model = configured_model
+                return self._resolved_model
+            raise RuntimeError(f"configured Ollama model unavailable: {configured_model}")
+
+        if self.auto_select_model and available_models:
+            self._resolved_model = available_models[0]
+            return self._resolved_model
+
+        raise RuntimeError("configured Ollama model unavailable: <empty>")
 
     def _determine_response_style(self, route_payload: Mapping[str, Any]) -> str:
         intent = _clean_text(route_payload.get("intent"))
@@ -399,6 +525,8 @@ class ResponseSynthesizer:
             "Do not provide medical diagnosis.\n"
             "Do not say it is safe to drive.\n"
             "Do not encourage additional alcohol intake.\n"
+            "If simulation numeric estimates are provided, do not alter those numeric values.\n"
+            "If route intent is scientific_evidence, cite specific retrieved evidence titles and excerpts.\n"
             "If confidence is limited, explicitly mention uncertainty.\n"
             "Return JSON only (no markdown).\n\n"
             "Output JSON schema:\n"
@@ -427,40 +555,14 @@ class ResponseSynthesizer:
             raise RuntimeError("LLM provider disabled")
         if self.llm_provider != "ollama":
             raise RuntimeError(f"Unsupported LLM provider: {self.llm_provider}")
-
-        url = urljoin(self.ollama_host.rstrip("/") + "/", "api/generate")
+        selected_model = self._resolve_generation_model()
         body = {
-            "model": self.model,
+            "model": selected_model,
             "prompt": prompt,
             "stream": False,
             "format": "json",
         }
-        request = Request(
-            url=url,
-            method="POST",
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        if self.ollama_api_key:
-            request.add_header("Authorization", f"Bearer {self.ollama_api_key}")
-
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310 - URL comes from runtime config
-                status = int(getattr(response, "status", 200))
-                payload_raw = response.read().decode("utf-8", errors="replace")
-        except HTTPError as exc:
-            raise RuntimeError(f"Ollama HTTP error: {exc.code}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"Ollama connection failed: {exc.reason}") from exc
-        except Exception as exc:
-            raise RuntimeError(f"Ollama request failed: {exc}") from exc
-
-        if status != 200:
-            raise RuntimeError(f"Ollama returned HTTP {status}")
-
-        parsed = _extract_json_object(payload_raw)
-        if parsed is None:
-            raise RuntimeError("Ollama returned non-JSON payload")
+        parsed = self._ollama_request(endpoint="api/generate", method="POST", body=body)
 
         output = _clean_text(parsed.get("response"))
         if output:
@@ -735,6 +837,8 @@ class ResponseSynthesizer:
         normalized_answer = _normalize_text(answer)
         for note in list(MANDATORY_SAFETY_NOTES) + [TOXICITY_SAFETY_NOTE]:
             normalized_answer = re.sub(re.escape(_normalize_text(note)), " ", normalized_answer)
+        for pattern in STANDARD_SAFETY_BOILERPLATE_PATTERNS:
+            normalized_answer = re.sub(pattern, " ", normalized_answer)
         normalized_answer = re.sub(r"\s+", " ", normalized_answer).strip()
 
         negative_drink_more = bool(
@@ -768,8 +872,15 @@ class ResponseSynthesizer:
         ]
 
         unknown_ratio = float(len(unknown_tokens)) / float(max(len(unique_answer_tokens), 1))
+        unknown_threshold = 0.68
+        simulation_summary = evidence_bundle.get("simulation_summary")
+        if isinstance(simulation_summary, Mapping):
+            simulations = simulation_summary.get("simulations")
+            if isinstance(simulations, list) and simulations:
+                if re.search(r"\b(?:bac|peak|sober|hours?|time to sober|time-to-sober)\b", normalized_answer):
+                    unknown_threshold = 0.78
         if strict_token_check:
-            if len(unique_answer_tokens) >= 14 and len(unknown_tokens) >= 10 and unknown_ratio >= 0.68:
+            if len(unique_answer_tokens) >= 14 and len(unknown_tokens) >= 10 and unknown_ratio >= unknown_threshold:
                 findings.append(
                     "High unknown-token ratio relative to provided evidence (possible unsupported content)."
                 )
@@ -886,21 +997,22 @@ class ResponseSynthesizer:
         model_limitations: List[str] = []
         self._model_fallback_used = False
         llm_disabled = self._llm_disabled()
+        model_backend = "deterministic_disabled"
 
-        if intent == "scientific_evidence":
-            parsed_payload = self._deterministic_scientific_evidence_response(evidence_bundle=evidence_bundle)
-            if llm_disabled:
-                model_limitations.append("LLM provider disabled; deterministic grounded synthesis used.")
-        elif llm_disabled:
+        if llm_disabled:
             self._model_fallback_used = True
             model_limitations.append("LLM provider disabled; deterministic grounded synthesis used.")
-            parsed_payload = self._rule_based_response(
-                query=query,
-                response_style=response_style,
-                route_payload=route_payload,
-                evidence_bundle=evidence_bundle,
-            )
+            if intent == "scientific_evidence":
+                parsed_payload = self._deterministic_scientific_evidence_response(evidence_bundle=evidence_bundle)
+            else:
+                parsed_payload = self._rule_based_response(
+                    query=query,
+                    response_style=response_style,
+                    route_payload=route_payload,
+                    evidence_bundle=evidence_bundle,
+                )
         else:
+            model_backend = "ollama_http"
             prompt = self._build_grounded_prompt(
                 query=query,
                 response_style=response_style,
@@ -912,13 +1024,17 @@ class ResponseSynthesizer:
                 parsed_payload = self._parse_model_payload(raw_output, evidence_bundle)
             except Exception as exc:
                 self._model_fallback_used = True
+                model_backend = "ollama_http_fallback"
                 model_limitations.append(f"Model generation fallback used: {exc}. Deterministic grounded synthesis used.")
-                parsed_payload = self._rule_based_response(
-                    query=query,
-                    response_style=response_style,
-                    route_payload=route_payload,
-                    evidence_bundle=evidence_bundle,
-                )
+                if intent == "scientific_evidence":
+                    parsed_payload = self._deterministic_scientific_evidence_response(evidence_bundle=evidence_bundle)
+                else:
+                    parsed_payload = self._rule_based_response(
+                        query=query,
+                        response_style=response_style,
+                        route_payload=route_payload,
+                        evidence_bundle=evidence_bundle,
+                    )
 
         if response_style == "layman":
             parsed_payload["answer"] = self._build_default_layman_answer(
@@ -937,6 +1053,20 @@ class ResponseSynthesizer:
             evidence_bundle=evidence_bundle,
             strict_token_check=(response_style != "layman" and intent != "scientific_evidence"),
         )
+
+        if intent == "scientific_evidence" and unsupported_claims_detected and not llm_disabled:
+            self._model_fallback_used = True
+            model_backend = "ollama_http_fallback"
+            model_limitations.append("Model scientific output was weakly grounded; deterministic grounded synthesis used.")
+            parsed_payload = self._deterministic_scientific_evidence_response(evidence_bundle=evidence_bundle)
+            answer = _clean_text(parsed_payload.get("answer"))
+            unsupported_claims_detected, grounding_findings = self._detect_unsupported_claims(
+                answer,
+                query=query,
+                route_payload=route_payload,
+                evidence_bundle=evidence_bundle,
+                strict_token_check=False,
+            )
 
         limitations = _as_list_of_strings(evidence_bundle.get("limitations"))
         limitations.extend(_as_list_of_strings(parsed_payload.get("limitations")))
@@ -1017,6 +1147,11 @@ class ResponseSynthesizer:
             "confidence_score": confidence_score,
             "unsupported_claims_detected": bool(unsupported_claims_detected),
             "safe_for_user_display": safe_for_user_display,
+            "model_backend": model_backend,
+            "llm_provider": self.llm_provider,
+            "llm_model_requested": _clean_text(self.model) or None,
+            "llm_model_selected": _clean_text(self._resolved_model) or None,
+            "generation_fallback_used": bool(self._model_fallback_used),
         }
 
         if not response["safe_for_user_display"]:

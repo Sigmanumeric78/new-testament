@@ -7,6 +7,8 @@ require supabase dependencies or credentials.
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -119,7 +121,26 @@ class SupabaseArtifactStore:
         client = self._get_client()
         storage = client.storage.from_(self.bucket)
 
-        data = storage.download(remote_path.strip("/"))
+        normalized_remote_path = remote_path.strip("/")
+        max_attempts = max(1, int(os.getenv("SUPABASE_DOWNLOAD_RETRIES", "3")))
+        retry_delay = max(0.0, float(os.getenv("SUPABASE_DOWNLOAD_RETRY_DELAY_SECONDS", "1.5")))
+        last_error: Exception | None = None
+        data: Any = b""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                data = storage.download(normalized_remote_path)
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt >= max_attempts:
+                    break
+                time.sleep(retry_delay * attempt)
+        if last_error is not None:
+            raise RuntimeError(
+                f"Supabase download failed after {max_attempts} attempts for {normalized_remote_path}: {last_error}"
+            ) from last_error
+
         if isinstance(data, (bytes, bytearray)):
             content = bytes(data)
         elif hasattr(data, "read"):

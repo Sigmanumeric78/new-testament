@@ -59,6 +59,7 @@ EXPECTED_ASK_KEYS: Set[str] = {
     "missing_info",
     "safe_for_display",
     "advisor_fallback_used",
+    "generation_fallback_used",
     "synthesis_blocked",
     "blocked_synthesis_reasons",
     "blocked_request_type",
@@ -101,7 +102,7 @@ def _guard_grounding_block_payload(query: str, response_payload: Dict[str, Any])
 
 
 @pytest.fixture(autouse=True)
-def _fast_deterministic_pipeline(monkeypatch: Any) -> None:
+def _fast_deterministic_pipeline(monkeypatch: Any, request: Any) -> None:
     from reasoning.hybrid_orchestrator import HybridOrchestrator
     from reasoning.response_synthesizer import ResponseSynthesizer
 
@@ -138,7 +139,14 @@ def _fast_deterministic_pipeline(monkeypatch: Any) -> None:
             ["Some supporting evidence was unavailable."],
         )
 
-    monkeypatch.setattr(ResponseSynthesizer, "_invoke_ollama", _force_model_fallback)
+    direct_ollama_tests = {
+        "test_disabled_provider_never_calls_ollama_http",
+        "test_ollama_provider_uses_http_and_auth_header",
+        "test_model_unavailable_does_not_attempt_generation_call",
+        "test_auto_select_model_when_model_empty",
+    }
+    if request.node.name not in direct_ollama_tests:
+        monkeypatch.setattr(ResponseSynthesizer, "_invoke_ollama", _force_model_fallback)
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", _neo4j_unavailable)
     monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", _weaviate_stub)
 
@@ -193,16 +201,37 @@ def test_ollama_probe_uses_http_host(monkeypatch: Any) -> None:
             _ = (exc_type, exc, tb)
             return False
 
-    monkeypatch.setattr(health_module, "get_ollama_config", lambda: {"host": "http://localhost:11434", "model": "qwen2.5:3b"})
+    monkeypatch.setattr(
+        health_module,
+        "get_ollama_config",
+        lambda: {
+            "provider": "ollama",
+            "enabled": "true",
+            "host": "https://ollama.com/api",
+            "model": "qwen2.5:3b",
+            "api_key": "test-api-key",
+        },
+    )
+
+    captured: Dict[str, Any] = {}
+
+    def _fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
+        captured["url"] = request.full_url
+        captured["auth"] = request.headers.get("Authorization")
+        captured["timeout"] = timeout
+        return _FakeResponse('{"models":[{"name":"qwen2.5:3b"}]}')
+
     monkeypatch.setattr(
         health_module,
         "urlopen",
-        lambda request, timeout=4: _FakeResponse('{"models":[{"name":"qwen2.5:3b"}]}'),
+        _fake_urlopen,
     )
 
     payload = health_module._ollama_probe()
     assert payload["ok"] is True
     assert payload["detail"].startswith("ok")
+    assert captured["url"] == "https://ollama.com/api/tags"
+    assert captured["auth"] == "Bearer test-api-key"
 
 
 def test_ollama_probe_treats_disabled_host_as_optional() -> None:
@@ -237,12 +266,213 @@ def test_ollama_probe_treats_provider_disabled_as_optional() -> None:
         health_module.get_ollama_config = original_get  # type: ignore[assignment]
 
 
+def test_ollama_probe_model_unavailable_marks_unhealthy() -> None:
+    import api.health as health_module
+
+    class _FakeResponse:
+        def __init__(self, payload: str) -> None:
+            self.status = 200
+            self._payload = payload.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+    original_get = health_module.get_ollama_config
+    original_urlopen = health_module.urlopen
+    try:
+        health_module.get_ollama_config = lambda: {  # type: ignore[assignment]
+            "provider": "ollama",
+            "enabled": "true",
+            "host": "https://ollama.com",
+            "model": "qwen2.5:3b",
+            "allow_unlisted_model": "false",
+            "auto_select_model": "false",
+            "api_key": "",
+        }
+        health_module.urlopen = lambda request, timeout=4: _FakeResponse('{"models":[{"name":"llama3.2"}]}')  # type: ignore[assignment]
+        probe = health_module._ollama_probe()
+        assert probe["ok"] is False
+        assert probe["detail"] == "configured model not available: qwen2.5:3b"
+    finally:
+        health_module.get_ollama_config = original_get  # type: ignore[assignment]
+        health_module.urlopen = original_urlopen  # type: ignore[assignment]
+
+
+def test_health_degraded_when_ollama_model_unavailable(monkeypatch: Any) -> None:
+    import api.health as health_module
+
+    monkeypatch.setattr(health_module, "_neo4j_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_weaviate_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_artifact_probe", lambda: {"ok": True, "detail": "ok", "missing_required_count": 0, "missing_required": []})
+    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": False, "detail": "configured model not available: qwen2.5:3b"})
+    payload = health_module.build_health_payload()
+    assert payload["status"] == "degraded"
+    assert payload["components"]["ollama"]["ok"] is False
+    assert payload["components"]["ollama"]["detail"] == "configured model not available: qwen2.5:3b"
+
+
 def test_response_synthesizer_does_not_use_subprocess_ollama_cli() -> None:
     import reasoning.response_synthesizer as synthesizer_module
 
     source = inspect.getsource(synthesizer_module)
     assert "subprocess.run" not in source
     assert "ollama executable not found" not in source
+
+
+def test_disabled_provider_never_calls_ollama_http(monkeypatch: Any) -> None:
+    import reasoning.response_synthesizer as rs_module
+
+    monkeypatch.setenv("LLM_PROVIDER", "disabled")
+    monkeypatch.setenv("OLLAMA_ENABLED", "false")
+    monkeypatch.setenv("OLLAMA_HOST", "http://disabled")
+
+    def _must_not_call(*args: Any, **kwargs: Any) -> Any:
+        _ = (args, kwargs)
+        raise AssertionError("urlopen should never be called when provider is disabled")
+
+    monkeypatch.setattr(rs_module, "urlopen", _must_not_call)
+    synthesizer = rs_module.ResponseSynthesizer()
+
+    with pytest.raises(RuntimeError, match="LLM provider disabled"):
+        synthesizer._invoke_ollama("test prompt")
+
+
+def test_ollama_provider_uses_http_and_auth_header(monkeypatch: Any) -> None:
+    import reasoning.response_synthesizer as rs_module
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com/api")
+    monkeypatch.setenv("OLLAMA_API_KEY", "secret-token")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+
+    class _FakeResponse:
+        def __init__(self, payload: str) -> None:
+            self.status = 200
+            self._payload = payload.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+    captured: Dict[str, Any] = {}
+
+    def _fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
+        captured["auth"] = request.headers.get("Authorization")
+        captured["timeout"] = timeout
+        if request.full_url.endswith("/api/tags"):
+            captured["tags_url"] = request.full_url
+            return _FakeResponse('{"models":[{"name":"qwen2.5:3b"}]}')
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeResponse('{"response":"{\\"answer\\":\\"ok\\",\\"used_facts\\":[],\\"used_causal_paths\\":[],\\"used_evidence_ids\\":[],\\"limitations\\":[]}"}')
+
+    monkeypatch.setattr(rs_module, "urlopen", _fake_urlopen)
+    synthesizer = rs_module.ResponseSynthesizer()
+    raw = synthesizer._invoke_ollama("prompt")
+
+    assert '"answer":"ok"' in raw.replace(" ", "")
+    assert captured["tags_url"] == "https://ollama.com/api/tags"
+    assert captured["url"] == "https://ollama.com/api/generate"
+    assert captured["auth"] == "Bearer secret-token"
+    assert captured["body"]["model"] == "qwen2.5:3b"
+    assert captured["body"]["stream"] is False
+
+
+def test_model_unavailable_does_not_attempt_generation_call(monkeypatch: Any) -> None:
+    import reasoning.response_synthesizer as rs_module
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+    monkeypatch.setenv("OLLAMA_ALLOW_UNLISTED_MODEL", "false")
+
+    class _FakeResponse:
+        def __init__(self, payload: str) -> None:
+            self.status = 200
+            self._payload = payload.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+    called_urls: list[str] = []
+
+    def _fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
+        _ = timeout
+        called_urls.append(request.full_url)
+        if request.full_url.endswith("/api/tags"):
+            return _FakeResponse('{"models":[{"name":"llama3.2"}]}')
+        raise AssertionError("Model listing failure path should not call /api/generate")
+
+    monkeypatch.setattr(rs_module, "urlopen", _fake_urlopen)
+    synthesizer = rs_module.ResponseSynthesizer()
+    with pytest.raises(RuntimeError, match="configured Ollama model unavailable: qwen2.5:3b"):
+        synthesizer._invoke_ollama("test prompt")
+    assert any(url.endswith("/api/tags") for url in called_urls)
+    assert not any(url.endswith("/api/generate") for url in called_urls)
+
+
+def test_auto_select_model_when_model_empty(monkeypatch: Any) -> None:
+    import reasoning.response_synthesizer as rs_module
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com")
+    monkeypatch.setenv("OLLAMA_MODEL", "")
+    monkeypatch.setenv("OLLAMA_AUTO_SELECT_MODEL", "true")
+    monkeypatch.setenv("OLLAMA_ALLOW_UNLISTED_MODEL", "false")
+
+    class _FakeResponse:
+        def __init__(self, payload: str) -> None:
+            self.status = 200
+            self._payload = payload.encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._payload
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+            _ = (exc_type, exc, tb)
+            return False
+
+    captured: Dict[str, Any] = {}
+
+    def _fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
+        _ = timeout
+        if request.full_url.endswith("/api/tags"):
+            return _FakeResponse('{"models":[{"name":"model-a"},{"name":"model-z"}]}')
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeResponse('{"response":"{\\"answer\\":\\"ok\\",\\"used_facts\\":[],\\"used_causal_paths\\":[],\\"used_evidence_ids\\":[],\\"limitations\\":[]}"}')
+
+    monkeypatch.setattr(rs_module, "urlopen", _fake_urlopen)
+    synthesizer = rs_module.ResponseSynthesizer()
+    _ = synthesizer._invoke_ollama("test prompt")
+    assert captured["url"].endswith("/api/generate")
+    assert captured["body"]["model"] == "model-a"
 
 
 def test_weaviate_probe_uses_http_meta(monkeypatch: Any) -> None:
@@ -337,6 +567,7 @@ def test_ask_continue_drinking_query_is_safe() -> None:
     assert "recommend using this app to decide whether to drink more" in guidance_lower or "increase impairment risk" in guidance_lower
     assert payload["blocked_request_type"] == "unsafe_continue_drinking_recommendation"
     assert payload["advisor_fallback_used"] in {True, False}
+    assert payload["generation_fallback_used"] in {True, False}
     assert payload["synthesis_blocked"] in {True, False}
     assert isinstance(payload["blocked_synthesis_reasons"], list)
     _assert_no_banned_terms(payload["answer"])
@@ -577,12 +808,149 @@ def test_scientific_query_uses_near_vector_and_non_blocking_deterministic_synthe
     assert weaviate_debug["query_vector_dimension"] == 768
     assert "ollama executable not found" not in json.dumps(synthesis_debug).lower()
     assert any("llm provider disabled; deterministic grounded synthesis used" in item.lower() for item in synthesis_debug["limitations"])
+    assert synthesis_debug["model_backend"] == "deterministic_disabled"
     assert guard_debug["grounding_score"] >= 0.70
     assert payload["synthesis_blocked"] is False
     assert payload["advisor_fallback_used"] is False
     answer_lower = payload["answer"].lower()
     assert "chemistry evidence champagne -> sulfites" in answer_lower
     assert "chemistry evidence dessert wine -> sulfites" in answer_lower
+
+
+def test_scientific_query_remote_ollama_failure_falls_back_cleanly(monkeypatch: Any) -> None:
+    import reasoning.response_synthesizer as rs_module
+    from reasoning.hybrid_orchestrator import HybridOrchestrator
+
+    def _weaviate_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        _ = (self, query, route)
+        return (
+            {
+                "status": "success",
+                "retrieval_backend": "weaviate_near_vector",
+                "top_k": 8,
+                "collections_searched": ["ScientificEvidence"],
+                "hit_count": 8,
+                "query_vector_dimension": 768,
+                "embedding_model_reference": "nomic-ai/nomic-embed-text-v1",
+                "hits": [
+                    {
+                        "object_id": "ev-1",
+                        "collection": "ScientificEvidence",
+                        "title": "Chemistry evidence Champagne -> sulfites",
+                        "content_excerpt": "Source row records beverage Champagne containing compound sulfites.",
+                        "score": 0.0,
+                        "distance": 0.009889,
+                        "source_dataset": "",
+                        "source_file": "",
+                    },
+                    {
+                        "object_id": "ev-2",
+                        "collection": "ScientificEvidence",
+                        "title": "Chemistry evidence Dessert Wine -> sulfites",
+                        "content_excerpt": "Source row records beverage Dessert Wine containing compound sulfites.",
+                        "score": 0.0,
+                        "distance": 0.010591,
+                        "source_dataset": "",
+                        "source_file": "",
+                    },
+                    {
+                        "object_id": "ev-3",
+                        "collection": "ScientificEvidence",
+                        "title": "Chemistry evidence Table Wine -> sulfites",
+                        "content_excerpt": "Source row records beverage Table Wine containing compound sulfites.",
+                        "score": 0.0,
+                        "distance": 0.010003,
+                        "source_dataset": "",
+                        "source_file": "",
+                    },
+                ],
+            },
+            [],
+        )
+
+    def _fail_remote(self: Any, prompt: str) -> str:
+        _ = (self, prompt)
+        raise RuntimeError("Ollama HTTP error: 503")
+
+    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", _weaviate_scientific)
+    monkeypatch.setattr(rs_module.ResponseSynthesizer, "_invoke_ollama", _fail_remote)
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com")
+
+    payload = ask_endpoint(
+        AskRequest(
+            query="Show research on sulfites and alcohol headaches",
+            response_style="scientific",
+            debug=True,
+        )
+    )
+
+    debug = payload["debug"]
+    synthesis_debug = debug["synthesis"]
+    guard_debug = debug["guard"]
+    weaviate_debug = debug["orchestration"]["module_results"]["weaviate"]
+    answer_lower = payload["answer"].lower()
+
+    assert weaviate_debug["retrieval_backend"] == "weaviate_near_vector"
+    assert weaviate_debug["hit_count"] > 0
+    assert payload["safe_for_display"] is True
+    assert payload["advisor_fallback_used"] is False
+    assert payload["synthesis_blocked"] is False
+    assert guard_debug["grounding_score"] >= 0.70
+    assert any("model generation fallback used" in item.lower() for item in synthesis_debug["limitations"])
+    assert str(synthesis_debug.get("model_backend", "")).startswith("ollama_http")
+    assert "ollama executable not found" not in json.dumps(synthesis_debug).lower()
+    assert "chemistry evidence champagne -> sulfites" in answer_lower
+
+
+def test_bac_estimates_not_mutated_by_llm_answer_wording(monkeypatch: Any) -> None:
+    import reasoning.response_synthesizer as rs_module
+
+    def _misleading_model_output(self: Any, prompt: str) -> str:
+        _ = (self, prompt)
+        return json.dumps(
+            {
+                "answer": "Estimated peak BAC is 0.99 and time to sober is 99 hours.",
+                "used_facts": [],
+                "used_causal_paths": [],
+                "used_evidence_ids": [],
+                "limitations": [],
+            }
+        )
+
+    monkeypatch.setattr(rs_module.ResponseSynthesizer, "_invoke_ollama", _misleading_model_output)
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com")
+
+    payload = ask_endpoint(
+        AskRequest(
+            query="I am 75 kg male, fed, I drank 50 ml vodka in 1 hour. What is happening in my body?",
+            response_style="technical",
+            debug=True,
+        )
+    )
+
+    assert payload["estimated_peak_bac"] is not None
+    assert payload["estimated_time_to_sober_h"] is not None
+    assert float(payload["estimated_peak_bac"]) < 0.08
+    assert float(payload["estimated_time_to_sober_h"]) < 20.0
+    assert payload["safe_for_display"] is True
+
+
+def test_pbpk_complete_query_not_blocked_when_generation_fallback_used() -> None:
+    payload = ask_endpoint(
+        AskRequest(
+            query="I am 75 kg male, fed, I drank 180 ml whisky in 1 hour. How drunk will I get?",
+            response_style="technical",
+            debug=False,
+        )
+    )
+    assert payload["estimated_peak_bac"] is not None
+    assert payload["synthesis_blocked"] is False
+    assert payload["advisor_fallback_used"] is False
+    assert payload["generation_fallback_used"] is True
 
 
 def test_debug_consistency_when_guard_blocks(monkeypatch: Any) -> None:

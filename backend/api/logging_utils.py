@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from utils.config import project_root
+from utils.config import get_data_root
 
-LOG_PATH = project_root() / "data" / "interim" / "api" / "api_request_log.jsonl"
+LOG_PATH = get_data_root() / "interim" / "api" / "api_request_log.jsonl"
 
 
 def _clean_text(value: Any) -> str:

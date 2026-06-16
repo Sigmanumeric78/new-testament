@@ -27,6 +27,13 @@ MANDATORY_SAFETY_NOTES: Tuple[str, ...] = (
 )
 
 TOXICITY_SAFETY_NOTE = "Seek medical help for severe symptoms."
+STANDARD_SAFETY_BOILERPLATE_PATTERNS: Tuple[str, ...] = (
+    r"\bdo not drive(?: or operate machinery)?(?: right now)?\b",
+    r"\bdo not use this app to decide whether to drink more\b",
+    r"\bwater can help dehydration, but it will not make alcohol leave your body faster\b",
+    r"\bthis app cannot determine legal or actual driving safety\b",
+    r"\bif you may need to drive, do not rely on this estimate\b",
+)
 
 BLOCKED_SAFETY_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bsafe to drive\b", "Contains unsafe driving claim ('safe to drive')."),
@@ -187,6 +194,29 @@ GENERIC_ALLOWED_TOKENS: Set[str] = {
     "dessert",
     "table",
     "sparkling",
+    "medical",
+    "advice",
+    "legal",
+    "driving",
+    "drive",
+    "machinery",
+    "dehydration",
+    "water",
+    "clearance",
+    "clear",
+    "operate",
+    "reaction",
+    "judgment",
+    "coordination",
+    "hours",
+    "sober",
+    "peak",
+    "bac",
+    "estimate",
+    "estimated",
+    "conservative",
+    "guidance",
+    "symptoms",
 }
 
 
@@ -244,6 +274,8 @@ def _strip_standard_safety_notes(answer: str) -> str:
     cleaned = answer
     for note in list(MANDATORY_SAFETY_NOTES) + [TOXICITY_SAFETY_NOTE]:
         cleaned = re.sub(re.escape(note), " ", cleaned, flags=re.IGNORECASE)
+    for pattern in STANDARD_SAFETY_BOILERPLATE_PATTERNS:
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -399,11 +431,50 @@ def _compute_grounding(
         unsupported = True
         warnings.append("Response synthesizer flagged unsupported claims.")
 
-    if len(unique_answer_tokens) >= 12 and unknown_ratio >= 0.45:
+    simulation_summary = response_payload.get("simulation_summary")
+    simulation_alignment = 0.0
+    if isinstance(simulation_summary, Mapping):
+        simulations = simulation_summary.get("simulations")
+        if isinstance(simulations, list) and simulations:
+            first = simulations[0] if isinstance(simulations[0], Mapping) else {}
+            expected_numeric_fragments: List[str] = []
+            for key, precision in (
+                ("peak_bac_percent", 3),
+                ("time_to_peak_h", 1),
+                ("time_to_sober_h", 1),
+                ("ethanol_g", 1),
+                ("ethanol_dose_g", 1),
+            ):
+                value = first.get(key)
+                if value is None:
+                    continue
+                try:
+                    numeric = float(value)
+                except Exception:
+                    continue
+                expected_numeric_fragments.append(f"{numeric:.{precision}f}".rstrip("0").rstrip("."))
+            normalized_answer = _normalize_text(clean_answer)
+            has_simulation_keywords = bool(
+                re.search(r"\b(?:bac|peak|sober|hours?|time to sober|time-to-sober)\b", normalized_answer)
+            )
+            matched_numeric = any(fragment and fragment in normalized_answer for fragment in expected_numeric_fragments)
+            if matched_numeric and has_simulation_keywords:
+                simulation_alignment = 1.0
+            elif has_simulation_keywords:
+                simulation_alignment = 0.7
+
+    unknown_threshold = 0.45
+    if simulation_alignment >= 0.7:
+        unknown_threshold = 0.65
+
+    if len(unique_answer_tokens) >= 12 and unknown_ratio >= unknown_threshold:
         unsupported = True
         warnings.append("High proportion of major answer tokens are not supported by evidence.")
 
-    score = (0.65 * token_overlap) + (0.25 * phrase_coverage) + (0.10 * evidence_mention)
+    if simulation_alignment > 0.0:
+        score = (0.55 * token_overlap) + (0.20 * phrase_coverage) + (0.10 * evidence_mention) + (0.15 * simulation_alignment)
+    else:
+        score = (0.65 * token_overlap) + (0.25 * phrase_coverage) + (0.10 * evidence_mention)
     if unsupported:
         score = min(score, 0.69)
 

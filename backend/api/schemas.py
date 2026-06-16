@@ -103,6 +103,7 @@ class AskResponse(BaseModel):
     missing_info: List[str]
     safe_for_display: bool
     advisor_fallback_used: bool = False
+    generation_fallback_used: bool = False
     synthesis_blocked: bool = False
     blocked_synthesis_reasons: List[str] = Field(default_factory=list)
     blocked_request_type: Optional[str]
