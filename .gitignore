@@ -122,3 +122,4 @@ data/raw/food_health/
 data/interim/food_health/
 data/processed/food_health/
 .env.mongodb
+.env.pinecone
