@@ -13,3 +13,4 @@ pytest
 httpx
 supabase
 pymongo
+pinecone>=9.1.0

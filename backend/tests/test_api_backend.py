@@ -723,6 +723,8 @@ def test_scientific_query_uses_near_vector_and_non_blocking_deterministic_synthe
     import reasoning.response_synthesizer as rs_module
     from reasoning.hybrid_orchestrator import HybridOrchestrator
 
+    monkeypatch.setenv("VECTOR_BACKEND", "weaviate")
+
     def _weaviate_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
         _ = (self, query, route)
         return (
@@ -820,6 +822,8 @@ def test_scientific_query_uses_near_vector_and_non_blocking_deterministic_synthe
 def test_scientific_query_remote_ollama_failure_falls_back_cleanly(monkeypatch: Any) -> None:
     import reasoning.response_synthesizer as rs_module
     from reasoning.hybrid_orchestrator import HybridOrchestrator
+
+    monkeypatch.setenv("VECTOR_BACKEND", "weaviate")
 
     def _weaviate_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
         _ = (self, query, route)

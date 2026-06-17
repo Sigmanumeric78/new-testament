@@ -41,7 +41,8 @@ try:
         repo_root,
         run_simulation,
     )
-    from utils.config import get_data_root, get_neo4j_config, get_weaviate_config
+    from utils.config import get_data_root, get_neo4j_config, get_vector_backend, get_weaviate_config
+    from vectorstores.pinecone_store import PineconeVectorStore
 except ModuleNotFoundError:  # pragma: no cover - direct script execution path fix
     REPO_ROOT = Path(__file__).resolve().parents[1]
     if str(REPO_ROOT) not in sys.path:
@@ -54,7 +55,8 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution path f
         repo_root,
         run_simulation,
     )
-    from utils.config import get_data_root, get_neo4j_config, get_weaviate_config
+    from utils.config import get_data_root, get_neo4j_config, get_vector_backend, get_weaviate_config
+    from vectorstores.pinecone_store import PineconeVectorStore
 
 LOGGER = logging.getLogger("hybrid_orchestrator")
 
@@ -1645,6 +1647,92 @@ class HybridOrchestrator:
                 except Exception:
                     pass
 
+    def _execute_pinecone(
+        self,
+        query: str,
+        route: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        intent = _clean_text(route.get("intent"))
+        collections = _collection_scope(intent)
+        search_query = _rewrite_weaviate_query(intent, query)
+        limitations: List[str] = []
+        query_vector_details: Dict[str, Any] = {}
+
+        try:
+            query_vector, query_vector_details = self._build_query_vector(search_query, collections)
+            store = PineconeVectorStore()
+            try:
+                hits = store.query_by_vector(query_vector, top_k=TOP_K, collections=collections)
+            finally:
+                store.close()
+
+            if not hits:
+                limitations.append("Pinecone returned zero hits; used embedded fallback retrieval.")
+                try:
+                    hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+                except Exception as embedded_exc:
+                    limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
+                    hits = []
+                backend = "embedded_fallback"
+            else:
+                backend = "pinecone"
+
+            hits, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=hits, top_k=TOP_K)
+            if low_relevance:
+                limitations.append("Some supporting evidence was unavailable.")
+
+            return (
+                {
+                    "status": "success",
+                    "retrieval_backend": backend,
+                    "top_k": TOP_K,
+                    "collections_searched": collections,
+                    "hit_count": len(hits),
+                    "hits": hits,
+                    **query_vector_details,
+                    "query_vector_dimension": 768,
+                    "embedding_model_reference": "nomic-ai/nomic-embed-text-v1",
+                },
+                limitations,
+            )
+        except Exception as exc:
+            limitations.append(f"Pinecone query failed; used embedded fallback retrieval: {exc}")
+            try:
+                fallback_hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
+            except Exception as embedded_exc:
+                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
+                fallback_hits = []
+            fallback_hits, low_relevance = _filter_relevant_hits(
+                intent=intent,
+                query=query,
+                hits=fallback_hits,
+                top_k=TOP_K,
+            )
+            if low_relevance:
+                limitations.append("Some supporting evidence was unavailable.")
+            return (
+                {
+                    "status": "success",
+                    "retrieval_backend": "embedded_fallback",
+                    "top_k": TOP_K,
+                    "collections_searched": collections,
+                    "hit_count": len(fallback_hits),
+                    "hits": fallback_hits,
+                    **query_vector_details,
+                },
+                limitations,
+            )
+
+    def _execute_vector_retrieval(
+        self,
+        query: str,
+        route: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        backend = get_vector_backend()
+        if backend == "pinecone":
+            return self._execute_pinecone(query=query, route=route)
+        return self._execute_weaviate(query=query, route=route)
+
     def _execute_toxicity(
         self,
         query: str,
@@ -1796,18 +1884,22 @@ class HybridOrchestrator:
                     retrieved_evidence.append(
                         {
                             "object_id": _clean_text(item.get("object_id")),
+                            "chunk_id": _clean_text(item.get("chunk_id")),
                             "collection": _clean_text(item.get("collection")),
                             "title": _clean_text(item.get("title")),
                             "content_excerpt": _clean_text(item.get("content_excerpt")),
+                            "content": _clean_text(item.get("content")),
                             "score": item.get("score"),
                             "distance": item.get("distance"),
+                            "retrieval_backend": _clean_text(item.get("retrieval_backend"))
+                            or _clean_text(weaviate_result.get("retrieval_backend")),
                             "source_dataset": _clean_text(item.get("source_dataset")),
                             "source_file": _clean_text(item.get("source_file")),
                         }
                     )
                 if hits:
                     key_facts.append(
-                        f"Weaviate retrieval returned {len(hits)} objects across {len(set([_clean_text(i.get('collection')) for i in hits]))} collections."
+                        f"Evidence retrieval returned {len(hits)} objects across {len(set([_clean_text(i.get('collection')) for i in hits]))} collections."
                     )
 
         toxicity_result = module_results.get("toxicity")
@@ -1892,7 +1984,7 @@ class HybridOrchestrator:
                 limitations.extend(neo4j_limits)
 
             elif module == "weaviate":
-                weaviate_result, weaviate_limits = self._execute_weaviate(
+                weaviate_result, weaviate_limits = self._execute_vector_retrieval(
                     query=text,
                     route=route_payload,
                 )

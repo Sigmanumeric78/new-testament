@@ -18,7 +18,8 @@ from reasoning.query_router import route_query
 from reasoning.response_synthesizer import ResponseSynthesizer
 from reasoning.user_risk_advisor import build_user_risk_advice
 from simulation.pbpk import pbpk_master_simulator
-from utils.config import get_neo4j_config, get_ollama_config, get_weaviate_config, resolve_project_path
+from utils.config import get_neo4j_config, get_ollama_config, get_vector_backend, get_weaviate_config, resolve_project_path
+from vectorstores.pinecone_store import PineconeVectorStore
 
 router = APIRouter()
 ARTIFACT_MANIFEST_PATH = resolve_project_path("data/artifact_manifest.example.json")
@@ -103,6 +104,23 @@ def _weaviate_probe() -> Dict[str, Any]:
         return _component(True, "ok")
     except Exception as exc:
         return _component(False, str(exc))
+
+
+def _pinecone_probe() -> Dict[str, Any]:
+    store: PineconeVectorStore | None = None
+    try:
+        store = PineconeVectorStore()
+        payload = store.ping()
+        total = int(payload.get("total_vector_count", 0) or 0)
+        namespace = _clean_text(payload.get("namespace"))
+        index = _clean_text(payload.get("index"))
+        detail = f"ok index={index} namespace={namespace} total_vector_count={total}"
+        return _component(True, detail)
+    except Exception as exc:
+        return _component(False, str(exc))
+    finally:
+        if store is not None:
+            store.close()
 
 
 def _ollama_is_disabled(config: Mapping[str, Any]) -> bool:
@@ -215,13 +233,20 @@ def _artifact_probe() -> Dict[str, Any]:
 
 
 def build_health_payload() -> Dict[str, Any]:
+    vector_backend = get_vector_backend()
     components = {
         "api": _component(True, "ok"),
         "neo4j": _neo4j_probe(),
-        "weaviate": _weaviate_probe(),
+        "weaviate": (
+            _component(True, "standby (VECTOR_BACKEND=pinecone)")
+            if vector_backend == "pinecone"
+            else _weaviate_probe()
+        ),
         "ollama": _ollama_probe(),
         "artifact_status": _artifact_probe(),
     }
+    if vector_backend == "pinecone":
+        components["pinecone"] = _pinecone_probe()
 
     try:
         _ = pbpk_master_simulator.run_simulation
@@ -260,7 +285,11 @@ def build_health_payload() -> Dict[str, Any]:
         components["user_risk_advisor"] = _component(False, str(exc))
 
     core_keys = ("api", "pbpk", "router", "orchestrator", "synthesizer", "grounding_guard", "user_risk_advisor")
-    external_keys = ["neo4j", "weaviate", "artifact_status"]
+    external_keys = ["neo4j", "artifact_status"]
+    if vector_backend == "pinecone":
+        external_keys.append("pinecone")
+    else:
+        external_keys.append("weaviate")
     if not _clean_text(components.get("ollama", {}).get("detail", "")).lower().startswith("disabled"):
         external_keys.append("ollama")
 

@@ -170,6 +170,36 @@ def get_weaviate_config() -> Dict[str, str]:
     return config
 
 
+def get_vector_backend() -> str:
+    _load_dotenv()
+    return os.getenv("VECTOR_BACKEND", "").strip().lower()
+
+
+def get_pinecone_config(*, require: bool = True) -> Dict[str, str | int]:
+    _load_dotenv()
+    raw_dimension = os.getenv("PINECONE_DIMENSION", "").strip() or "768"
+    try:
+        dimension = int(raw_dimension)
+    except ValueError as exc:
+        raise ValueError("PINECONE_DIMENSION must be an integer.") from exc
+    if dimension <= 0:
+        raise ValueError("PINECONE_DIMENSION must be a positive integer.")
+
+    config: Dict[str, str | int] = {
+        "api_key": os.getenv("PINECONE_API_KEY", "").strip(),
+        "index": os.getenv("PINECONE_INDEX", "").strip() or "healthlens-knowledge",
+        "namespace": os.getenv("PINECONE_NAMESPACE", "").strip() or "production",
+        "dimension": dimension,
+        "metric": os.getenv("PINECONE_METRIC", "").strip() or "cosine",
+    }
+    if require and not config["api_key"]:
+        raise ValueError(
+            "Missing Pinecone configuration values: PINECONE_API_KEY. "
+            "This is only required when VECTOR_BACKEND=pinecone or when running Pinecone scripts."
+        )
+    return config
+
+
 def get_ollama_config() -> Dict[str, str]:
     _load_dotenv()
     raw_host = os.getenv("OLLAMA_HOST")
