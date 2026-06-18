@@ -275,16 +275,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    execute = bool(args.execute)
-    dry_run = bool(args.dry_run or not execute)
-    runtime_only = bool(args.runtime_only)
-    if bool(args.all_artifacts):
+def restore_release(
+    release: str,
+    *,
+    execute: bool,
+    overwrite: bool,
+    runtime_only: bool,
+    workspace_dir: str | Path = "",
+    all_artifacts: bool = False,
+    dry_run: bool | None = None,
+) -> Dict[str, Any]:
+    execute = bool(execute)
+    dry_run = bool(dry_run) if dry_run is not None else not execute
+    runtime_only = bool(runtime_only)
+    if bool(all_artifacts):
         runtime_only = False
 
-    release = _validate_release_name(args.release)
-    workspace_dir = _workspace_dir_from_args(release, args.workspace_dir)
+    release = _validate_release_name(release)
+    workspace_dir_raw = workspace_dir.as_posix() if isinstance(workspace_dir, Path) else str(workspace_dir or "")
+    workspace_dir = _workspace_dir_from_args(release, workspace_dir_raw)
     workspace_dir.mkdir(parents=True, exist_ok=True)
     workspace_manifest = _artifact_workspace_manifest_path(workspace_dir)
     release_dir = default_release_dir(release)
@@ -329,8 +338,7 @@ def main() -> int:
             "unavailable_required": plan["unavailable_required"],
             "runtime_only": runtime_only,
         }
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 1
+        return payload
 
     downloaded: List[str] = []
     restored_chunked: List[str] = []
@@ -341,7 +349,7 @@ def main() -> int:
             store.download_file(
                 remote_path=item["remote_path"],
                 local_path=resolve_path(item["local_path"]).as_posix(),
-                overwrite=bool(args.overwrite),
+                overwrite=bool(overwrite),
             )
             downloaded.append(item["artifact_id"])
 
@@ -381,13 +389,13 @@ def main() -> int:
                 store.download_file(
                     remote_path=part_remote_path,
                     local_path=part_local_path.as_posix(),
-                    overwrite=bool(args.overwrite),
+                    overwrite=bool(overwrite),
                 )
                 downloaded.append(f"{artifact_id}:{part_name}")
 
             manifest_local_path.write_text(json.dumps(chunk_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             try:
-                reassemble_chunked_artifact(chunk_manifest, overwrite=bool(args.overwrite))
+                reassemble_chunked_artifact(chunk_manifest, overwrite=bool(overwrite))
                 restored_chunked.append(artifact_id)
             except FileExistsError:
                 skipped_chunked_existing.append(artifact_id)
@@ -415,8 +423,22 @@ def main() -> int:
         "missing_local": plan["missing_local"],
         "checksum_mismatches": plan["checksum_mismatches"],
     }
+    return payload
+
+
+def main() -> int:
+    args = parse_args()
+    payload = restore_release(
+        args.release,
+        execute=bool(args.execute),
+        overwrite=bool(args.overwrite),
+        runtime_only=bool(args.runtime_only),
+        workspace_dir=args.workspace_dir,
+        all_artifacts=bool(args.all_artifacts),
+        dry_run=bool(args.dry_run or not args.execute),
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0
+    return 1 if payload.get("error") else 0
 
 
 if __name__ == "__main__":

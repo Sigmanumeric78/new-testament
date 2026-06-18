@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter
 
+from artifacts.artifact_restore_manager import get_restore_status
 from artifacts.artifact_manager import check_all_artifacts, filter_runtime_specs, load_manifest, summarize_artifacts
 from reasoning.grounding_safety_guard import GroundingSafetyGuard
 from reasoning.hybrid_orchestrator import orchestrate_query
@@ -52,13 +53,34 @@ def _component(ok: bool, detail: str) -> Dict[str, Any]:
     return {"ok": bool(ok), "detail": _clean_text(detail) or ("ok" if ok else "unavailable")}
 
 
-def _artifact_component(ok: bool, detail: str, *, missing_required: List[str]) -> Dict[str, Any]:
-    return {
+def _artifact_component(
+    ok: bool,
+    detail: str,
+    *,
+    missing_required: List[str],
+    missing_required_count: int | None = None,
+    artifact_state: str = "",
+    restore_status: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    missing_items = sorted(set([_clean_text(item) for item in missing_required if _clean_text(item)]))
+    payload: Dict[str, Any] = {
         "ok": bool(ok),
         "detail": _clean_text(detail) or ("ok" if ok else "unavailable"),
-        "missing_required_count": int(len(missing_required)),
-        "missing_required": sorted(set([_clean_text(item) for item in missing_required if _clean_text(item)])),
+        "missing_required_count": int(len(missing_items) if missing_required_count is None else missing_required_count),
+        "missing_required": missing_items,
     }
+    if _clean_text(artifact_state):
+        payload["status"] = _clean_text(artifact_state)
+    if restore_status is not None:
+        payload["restore_status"] = {
+            "status": _clean_text(restore_status.get("status")) or "idle",
+            "started_at": _clean_text(restore_status.get("started_at")),
+            "completed_at": _clean_text(restore_status.get("completed_at")),
+            "error_summary": _clean_text(restore_status.get("error_summary")),
+            "restored_count": int(restore_status.get("restored_count", 0) or 0),
+            "missing_required_count": int(restore_status.get("missing_required_count", 0) or 0),
+        }
+    return payload
 
 
 def _socket_probe(host: str, port: int, timeout_seconds: float = 1.5) -> Dict[str, Any]:
@@ -205,22 +227,60 @@ def _ollama_probe() -> Dict[str, Any]:
 
 
 def _artifact_probe() -> Dict[str, Any]:
+    restore_status = get_restore_status()
+    restore_state = _clean_text(restore_status.get("status")).lower()
+    if restore_state == "restoring":
+        missing_required = list(restore_status.get("missing_required", []) or [])
+        return _artifact_component(
+            False,
+            "restoring",
+            missing_required=missing_required,
+            missing_required_count=int(restore_status.get("missing_required_count", len(missing_required)) or 0),
+            artifact_state="restoring",
+            restore_status=restore_status,
+        )
+    if restore_state == "failed":
+        missing_required = list(restore_status.get("missing_required", []) or [])
+        detail = _clean_text(restore_status.get("error_summary")) or "artifact restore failed"
+        return _artifact_component(
+            False,
+            f"restore failed: {detail}",
+            missing_required=missing_required,
+            missing_required_count=int(restore_status.get("missing_required_count", len(missing_required)) or 0),
+            artifact_state="failed",
+            restore_status=restore_status,
+        )
+
     if not ARTIFACT_MANIFEST_PATH.exists():
         return _artifact_component(
             False,
             f"artifact manifest not found: {ARTIFACT_MANIFEST_PATH.as_posix()}",
             missing_required=[],
+            artifact_state="failed",
+            restore_status=restore_status,
         )
 
     try:
         manifest = load_manifest(ARTIFACT_MANIFEST_PATH.as_posix())
         runtime_specs = filter_runtime_specs(manifest)
         if not runtime_specs:
-            return _artifact_component(False, "no runtime artifacts selected from manifest", missing_required=[])
+            return _artifact_component(
+                False,
+                "no runtime artifacts selected from manifest",
+                missing_required=[],
+                artifact_state="failed",
+                restore_status=restore_status,
+            )
         statuses = check_all_artifacts(runtime_specs)
         summary = summarize_artifacts(statuses)
     except Exception as exc:
-        return _artifact_component(False, f"artifact status check failed: {exc}", missing_required=[])
+        return _artifact_component(
+            False,
+            f"artifact status check failed: {exc}",
+            missing_required=[],
+            artifact_state="failed",
+            restore_status=restore_status,
+        )
 
     missing = list(summary.get("missing_required", []) or [])
     if missing:
@@ -228,8 +288,10 @@ def _artifact_probe() -> Dict[str, Any]:
             False,
             f"{len(missing)} required artifacts missing.",
             missing_required=missing,
+            artifact_state="degraded",
+            restore_status=restore_status,
         )
-    return _artifact_component(True, "ok", missing_required=[])
+    return _artifact_component(True, "ok", missing_required=[], artifact_state="ok", restore_status=restore_status)
 
 
 def build_health_payload() -> Dict[str, Any]:

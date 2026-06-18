@@ -62,6 +62,7 @@ def test_lambda_dockerfile_sets_tmp_data_root_defaults() -> None:
     text = _read(BACKEND_ROOT / "Dockerfile.lambda")
     assert "DATA_ROOT=/tmp/data" in text
     assert "RESTORE_WORKSPACE_DIR=/tmp/restore" in text
+    assert "ARTIFACT_RESTORE_MODE=background" in text
     assert "PROJECT_ROOT=/app" in text
     assert "PORT=8000" in text
     assert "CMD [\"uvicorn\", \"backend.api.main:app\"" in text
@@ -71,21 +72,23 @@ def test_dockerfile_has_restore_startup_entrypoint_and_env_defaults() -> None:
     text = _read(BACKEND_ROOT / "Dockerfile")
     assert "ENTRYPOINT [\"bash\", \"/app/backend/docker-entrypoint.sh\"]" in text
     assert "RESTORE_ARTIFACTS_ON_STARTUP=false" in text
+    assert "ARTIFACT_RESTORE_MODE=background" in text
     assert "ARTIFACT_RELEASE=v0.6-chemical-explorer" in text
     assert "PROJECT_ROOT=/app" in text
     assert "DATA_ROOT=/app/data" in text
 
 
-def test_docker_entrypoint_exists_and_runs_restore_commands() -> None:
+def test_docker_entrypoint_exists_and_defers_restore_to_fastapi() -> None:
     path = BACKEND_ROOT / "docker-entrypoint.sh"
     assert path.exists()
     text = _read(path)
     assert "RESTORE_ARTIFACTS_ON_STARTUP" in text
-    assert "artifact_download_supabase.py" in text
-    assert "artifact_verify_release.py" in text
-    assert "--execute" in text
-    assert "--overwrite" in text
-    assert "--runtime-only" in text
+    assert "ARTIFACT_RESTORE_MODE" in text
+    assert "FastAPI will schedule background restore" in text
+    assert "artifact_download_supabase.py" not in text
+    assert "artifact_download_mongodb.py" not in text
+    assert "artifact_verify_release.py" not in text
+    assert 'exec "$@"' in text
 
 
 def test_lambda_entrypoint_compatible_restore_vars() -> None:

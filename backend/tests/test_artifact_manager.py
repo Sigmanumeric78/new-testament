@@ -4,6 +4,8 @@ import inspect
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -471,6 +473,73 @@ def test_health_includes_artifact_status() -> None:
     assert "detail" in artifact
     assert "missing_required_count" in artifact
     assert "missing_required" in artifact
+
+
+def test_background_artifact_restore_schedules_once(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import artifacts.artifact_restore_manager as restore_manager
+
+    restore_manager._reset_restore_state_for_tests()
+    started = threading.Event()
+    release_restore = threading.Event()
+    calls: List[Dict[str, str]] = []
+
+    def _fake_restore_artifacts(*, backend: str, release: str) -> Dict[str, Any]:
+        calls.append({"backend": backend, "release": release})
+        started.set()
+        assert release_restore.wait(timeout=2)
+        return {"restored_count": 3}
+
+    monkeypatch.setenv("ARTIFACT_STORE_BACKEND", "mongodb")
+    monkeypatch.setenv("ARTIFACT_RELEASE", "v-test")
+    monkeypatch.setattr(restore_manager, "_restore_artifacts", _fake_restore_artifacts)
+    monkeypatch.setattr(
+        restore_manager,
+        "_artifact_availability_summary",
+        lambda *_args, **_kwargs: {"missing_required_count": 0, "missing_required": [], "error": ""},
+    )
+
+    try:
+        status = restore_manager.schedule_background_restore()
+        assert status["status"] == "restoring"
+        assert started.wait(timeout=1)
+
+        second_status = restore_manager.schedule_background_restore()
+        assert second_status["status"] == "restoring"
+        assert len(calls) == 1
+
+        release_restore.set()
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            final_status = restore_manager.get_restore_status()
+            if final_status["status"] == "ok":
+                break
+            time.sleep(0.01)
+
+        final_status = restore_manager.get_restore_status()
+        assert final_status["status"] == "ok"
+        assert final_status["restored_count"] == 3
+        assert calls == [{"backend": "mongodb", "release": "v-test"}]
+        output = capsys.readouterr().out
+        assert "[artifact-restore] background restore scheduled" in output
+        assert "[artifact-restore] restore started" in output
+        assert "[artifact-restore] restore completed" in output
+    finally:
+        release_restore.set()
+        restore_manager._reset_restore_state_for_tests()
+
+
+def test_artifact_restore_error_redacts_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    import artifacts.artifact_restore_manager as restore_manager
+
+    secret_uri = "mongodb+srv://user:super-secret@example.mongodb.net/db"
+    monkeypatch.setenv("MONGODB_URI", secret_uri)
+
+    sanitized = restore_manager._sanitize_error(f"failed to connect to {secret_uri} with Bearer token-123")
+
+    assert "super-secret" not in sanitized
+    assert secret_uri not in sanitized
+    assert "token-123" not in sanitized
+    assert "<redacted>" in sanitized
 
 
 def test_missing_artifacts_degrade_health_without_crash(monkeypatch: Any, tmp_path: Path) -> None:

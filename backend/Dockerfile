@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PROJECT_ROOT=/app \
     DATA_ROOT=/app/data \
     RESTORE_ARTIFACTS_ON_STARTUP=false \
+    ARTIFACT_RESTORE_MODE=background \
     ARTIFACT_RELEASE=v0.6-chemical-explorer \
     ARTIFACT_STORE_BACKEND=supabase
 

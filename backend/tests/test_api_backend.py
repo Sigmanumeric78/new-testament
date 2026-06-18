@@ -183,6 +183,62 @@ def test_health_endpoint_returns_valid_json() -> None:
     assert "missing_required" in artifact
 
 
+def test_health_reports_background_artifact_restore_without_scanning(monkeypatch: Any) -> None:
+    import api.health as health_module
+
+    monkeypatch.setattr(
+        health_module,
+        "get_restore_status",
+        lambda: {
+            "status": "restoring",
+            "started_at": "2026-06-18T00:00:00+00:00",
+            "completed_at": "",
+            "error_summary": "",
+            "restored_count": 0,
+            "missing_required_count": 20,
+            "missing_required": ["artifact_a"],
+        },
+    )
+
+    def _must_not_scan(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("health must not scan artifacts while restore is running")
+
+    monkeypatch.setattr(health_module, "check_all_artifacts", _must_not_scan)
+
+    artifact = health_module._artifact_probe()
+
+    assert artifact["ok"] is False
+    assert artifact["status"] == "restoring"
+    assert artifact["detail"] == "restoring"
+    assert artifact["missing_required_count"] == 20
+    assert artifact["restore_status"]["status"] == "restoring"
+
+
+def test_health_reports_failed_artifact_restore(monkeypatch: Any) -> None:
+    import api.health as health_module
+
+    monkeypatch.setattr(
+        health_module,
+        "get_restore_status",
+        lambda: {
+            "status": "failed",
+            "started_at": "2026-06-18T00:00:00+00:00",
+            "completed_at": "2026-06-18T00:00:10+00:00",
+            "error_summary": "20 required artifacts missing after restore",
+            "restored_count": 0,
+            "missing_required_count": 20,
+            "missing_required": ["artifact_a"],
+        },
+    )
+
+    artifact = health_module._artifact_probe()
+
+    assert artifact["ok"] is False
+    assert artifact["status"] == "failed"
+    assert artifact["detail"] == "restore failed: 20 required artifacts missing after restore"
+    assert artifact["restore_status"]["error_summary"] == "20 required artifacts missing after restore"
+
+
 def test_ollama_probe_uses_http_host(monkeypatch: Any) -> None:
     import api.health as health_module
 

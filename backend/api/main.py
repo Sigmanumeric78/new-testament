@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Mapping
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -13,8 +14,16 @@ from api.chemical_routes import router as chemical_router
 from api.health import router as health_router
 from api.logging_utils import structured_error
 from api.routes import router as pipeline_router
+from artifacts.artifact_restore_manager import schedule_background_restore_if_enabled
 
-app = FastAPI(title="Alcohol Intelligence API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    schedule_background_restore_if_enabled()
+    yield
+
+
+app = FastAPI(title="Alcohol Intelligence API", version="0.1.0", lifespan=lifespan)
 
 ALLOWED_CORS_ORIGINS = [
     "http://localhost:3000",
