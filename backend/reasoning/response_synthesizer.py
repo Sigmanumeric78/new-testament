@@ -1,7 +1,7 @@
 """Phase 08C grounded response synthesizer.
 
 This module only consumes structured output from the Phase 08B hybrid orchestrator.
-It does not directly execute PBPK, Neo4j, or Weaviate queries.
+It does not directly execute PBPK, Neo4j, or semantic retrieval queries.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution path f
 
 LOGGER = logging.getLogger("response_synthesizer")
 
-OLLAMA_MODEL = "qwen2.5:3b"
+OLLAMA_MODEL = ""
 
 RESPONSE_STYLES: Tuple[str, ...] = ("layman", "technical", "scientific")
 
@@ -245,7 +245,6 @@ UNSAFE_PATTERNS: Tuple[Tuple[str, str], ...] = (
 LAYMAN_BANNED_TERMS: Tuple[str, ...] = (
     "pbpk",
     "neo4j",
-    "weaviate",
     "causal path",
     "adh",
     "aldh",
@@ -357,12 +356,14 @@ def _extract_ollama_model_names(payload: Any) -> List[str]:
         return []
     models = payload.get("models")
     if not isinstance(models, list):
+        models = payload.get("data")
+    if not isinstance(models, list):
         return []
     names: List[str] = []
     for item in models:
         if not isinstance(item, Mapping):
             continue
-        name = _clean_text(item.get("name")) or _clean_text(item.get("model"))
+        name = _clean_text(item.get("name")) or _clean_text(item.get("model")) or _clean_text(item.get("id"))
         if name:
             names.append(name)
     return sorted(set(names))
@@ -398,7 +399,7 @@ class ResponseSynthesizer:
         ollama_config = get_ollama_config()
         self.model = _clean_text(ollama_config.get("model"))
         if "model" not in ollama_config:
-            self.model = _clean_text(model) or OLLAMA_MODEL
+            self.model = _clean_text(model)
         self.ollama_host = _clean_text(ollama_config.get("host"))
         self.ollama_api_key = _clean_text(ollama_config.get("api_key"))
         self.llm_provider = _normalize_text(ollama_config.get("provider")) or "ollama"
@@ -456,7 +457,16 @@ class ResponseSynthesizer:
     def _fetch_available_models(self) -> List[str]:
         if self._available_models is not None:
             return list(self._available_models)
-        payload = self._ollama_request(endpoint="api/tags", method="GET")
+        payload: Dict[str, Any] = {}
+        last_error = ""
+        for endpoint in ("api/tags", "v1/models"):
+            try:
+                payload = self._ollama_request(endpoint=endpoint, method="GET")
+                break
+            except Exception as exc:
+                last_error = str(exc)
+        if not payload:
+            raise RuntimeError(last_error or "Ollama model list unavailable")
         models = _extract_ollama_model_names(payload)
         self._available_models = list(models)
         return list(models)

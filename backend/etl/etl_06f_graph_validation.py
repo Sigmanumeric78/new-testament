@@ -318,7 +318,7 @@ def build_failed_report(config: Mapping[str, str], missing_env: Sequence[str], e
             "orphan_rate": 1.0,
             "connected_component_count": 0,
         },
-        "safe_for_weaviate_ingestion": False,
+        "safe_for_semantic_ingestion": False,
         "reasoning": [
             "Graph validation did not run successfully.",
             "Resolve Neo4j driver/environment prerequisites and rerun.",
@@ -341,14 +341,14 @@ def main() -> None:
         report = build_failed_report(config, [], str(exc))
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding=ENCODING)
         LOGGER.info("Wrote Neo4j graph validation report -> %s", report_path)
-        LOGGER.info("safe_for_weaviate_ingestion=%s", report["safe_for_weaviate_ingestion"])
+        LOGGER.info("safe_for_semantic_ingestion=%s", report["safe_for_semantic_ingestion"])
         return
 
     if GraphDatabase is None:
         report = build_failed_report(config, [], "neo4j Python driver is not installed in this environment.")
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding=ENCODING)
         LOGGER.info("Wrote Neo4j graph validation report -> %s", report_path)
-        LOGGER.info("safe_for_weaviate_ingestion=%s", report["safe_for_weaviate_ingestion"])
+        LOGGER.info("safe_for_semantic_ingestion=%s", report["safe_for_semantic_ingestion"])
         return
 
     try:
@@ -382,7 +382,7 @@ def main() -> None:
             4,
         )
 
-        safe_for_weaviate_ingestion = (
+        safe_for_semantic_ingestion = (
             len(missing_relationship_types) == 0
             and invalid_directionality_total == 0
             and duplicate_relationship_total == 0
@@ -414,7 +414,7 @@ def main() -> None:
                 "connected_component_count": int(component_count),
                 "zero_degree_component_count": int(zero_degree_components),
             },
-            "safe_for_weaviate_ingestion": safe_for_weaviate_ingestion,
+            "safe_for_semantic_ingestion": safe_for_semantic_ingestion,
             "reasoning": [
                 f"Required relationship types missing: {len(missing_relationship_types)}.",
                 f"Invalid directionality relationships: {invalid_directionality_total}.",
@@ -431,7 +431,7 @@ def main() -> None:
 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding=ENCODING)
     LOGGER.info("Wrote Neo4j graph validation report -> %s", report_path)
-    LOGGER.info("safe_for_weaviate_ingestion=%s", report["safe_for_weaviate_ingestion"])
+    LOGGER.info("safe_for_semantic_ingestion=%s", report["safe_for_semantic_ingestion"])
 
 
 if __name__ == "__main__":

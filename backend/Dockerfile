@@ -8,7 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RESTORE_ARTIFACTS_ON_STARTUP=false \
     ARTIFACT_RESTORE_MODE=background \
     ARTIFACT_RELEASE=v0.6-chemical-explorer \
-    ARTIFACT_STORE_BACKEND=supabase
+    ARTIFACT_STORE_BACKEND=mongodb \
+    VECTOR_BACKEND=pinecone \
+    PINECONE_INDEX=healthlens-knowledge \
+    PINECONE_NAMESPACE=production \
+    PINECONE_DIMENSION=768 \
+    PINECONE_METRIC=cosine
 
 WORKDIR /app
 

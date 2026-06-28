@@ -69,7 +69,6 @@ EXPECTED_ASK_KEYS: Set[str] = {
 BANNED_TERMS = (
     "pbpk",
     "neo4j",
-    "weaviate",
     "causal path",
     "graph",
     "adh",
@@ -125,7 +124,7 @@ def _fast_deterministic_pipeline(monkeypatch: Any, request: Any) -> None:
             ["Neo4j module unavailable in tests."],
         )
 
-    def _weaviate_stub(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+    def _semantic_retrieval_stub(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
         _ = (query, route)
         return (
             {
@@ -148,7 +147,7 @@ def _fast_deterministic_pipeline(monkeypatch: Any, request: Any) -> None:
     if request.node.name not in direct_ollama_tests:
         monkeypatch.setattr(ResponseSynthesizer, "_invoke_ollama", _force_model_fallback)
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", _neo4j_unavailable)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", _weaviate_stub)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", _semantic_retrieval_stub)
 
 
 def _assert_no_banned_terms(text: str) -> None:
@@ -160,14 +159,15 @@ def _assert_no_banned_terms(text: str) -> None:
 def test_health_endpoint_returns_valid_json() -> None:
     payload = health_check()
 
-    assert payload["status"] in {"ok", "degraded", "error"}
+    assert payload["status"] in {"healthy", "degraded", "error"}
     components = payload["components"]
     required = {
         "api",
         "neo4j",
-        "weaviate",
+        "mongodb",
         "ollama",
         "artifact_status",
+        "pinecone",
         "pbpk",
         "router",
         "orchestrator",
@@ -176,6 +176,8 @@ def test_health_endpoint_returns_valid_json() -> None:
         "user_risk_advisor",
     }
     assert required.issubset(set(components.keys()))
+    assert "weaviate" not in components
+    assert "supabase" not in components
     artifact = components["artifact_status"]
     assert "ok" in artifact
     assert "detail" in artifact
@@ -264,7 +266,7 @@ def test_ollama_probe_uses_http_host(monkeypatch: Any) -> None:
             "provider": "ollama",
             "enabled": "true",
             "host": "https://ollama.com/api",
-            "model": "qwen2.5:3b",
+            "model": "verified-test-model",
             "api_key": "test-api-key",
         },
     )
@@ -275,7 +277,7 @@ def test_ollama_probe_uses_http_host(monkeypatch: Any) -> None:
         captured["url"] = request.full_url
         captured["auth"] = request.headers.get("Authorization")
         captured["timeout"] = timeout
-        return _FakeResponse('{"models":[{"name":"qwen2.5:3b"}]}')
+        return _FakeResponse('{"models":[{"name":"verified-test-model"}]}')
 
     monkeypatch.setattr(
         health_module,
@@ -295,10 +297,10 @@ def test_ollama_probe_treats_disabled_host_as_optional() -> None:
 
     original_get = health_module.get_ollama_config
     try:
-        health_module.get_ollama_config = lambda: {"host": "http://disabled", "model": "qwen2.5:3b"}  # type: ignore[assignment]
+        health_module.get_ollama_config = lambda: {"host": "http://disabled", "model": "verified-test-model"}  # type: ignore[assignment]
         probe = health_module._ollama_probe()
         assert probe["ok"] is True
-        assert probe["detail"] == "disabled"
+        assert probe["detail"] == "standby (OLLAMA_HOST=disabled)"
     finally:
         health_module.get_ollama_config = original_get  # type: ignore[assignment]
 
@@ -312,12 +314,12 @@ def test_ollama_probe_treats_provider_disabled_as_optional() -> None:
             "provider": "disabled",
             "enabled": "true",
             "host": "http://localhost:11434",
-            "model": "qwen2.5:3b",
+            "model": "verified-test-model",
             "api_key": "",
         }
         probe = health_module._ollama_probe()
         assert probe["ok"] is True
-        assert probe["detail"] == "disabled"
+        assert probe["detail"] == "standby (LLM_PROVIDER=disabled)"
     finally:
         health_module.get_ollama_config = original_get  # type: ignore[assignment]
 
@@ -347,7 +349,7 @@ def test_ollama_probe_model_unavailable_marks_unhealthy() -> None:
             "provider": "ollama",
             "enabled": "true",
             "host": "https://ollama.com",
-            "model": "qwen2.5:3b",
+            "model": "verified-test-model",
             "allow_unlisted_model": "false",
             "auto_select_model": "false",
             "api_key": "",
@@ -355,7 +357,7 @@ def test_ollama_probe_model_unavailable_marks_unhealthy() -> None:
         health_module.urlopen = lambda request, timeout=4: _FakeResponse('{"models":[{"name":"llama3.2"}]}')  # type: ignore[assignment]
         probe = health_module._ollama_probe()
         assert probe["ok"] is False
-        assert probe["detail"] == "configured model not available: qwen2.5:3b"
+        assert probe["detail"] == "configured model not available: verified-test-model"
     finally:
         health_module.get_ollama_config = original_get  # type: ignore[assignment]
         health_module.urlopen = original_urlopen  # type: ignore[assignment]
@@ -365,13 +367,14 @@ def test_health_degraded_when_ollama_model_unavailable(monkeypatch: Any) -> None
     import api.health as health_module
 
     monkeypatch.setattr(health_module, "_neo4j_probe", lambda: {"ok": True, "detail": "ok"})
-    monkeypatch.setattr(health_module, "_weaviate_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_mongodb_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_pinecone_probe", lambda: {"ok": True, "detail": "ok"})
     monkeypatch.setattr(health_module, "_artifact_probe", lambda: {"ok": True, "detail": "ok", "missing_required_count": 0, "missing_required": []})
-    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": False, "detail": "configured model not available: qwen2.5:3b"})
+    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": False, "detail": "configured model not available: verified-test-model"})
     payload = health_module.build_health_payload()
     assert payload["status"] == "degraded"
     assert payload["components"]["ollama"]["ok"] is False
-    assert payload["components"]["ollama"]["detail"] == "configured model not available: qwen2.5:3b"
+    assert payload["components"]["ollama"]["detail"] == "configured model not available: verified-test-model"
 
 
 def test_response_synthesizer_does_not_use_subprocess_ollama_cli() -> None:
@@ -407,7 +410,7 @@ def test_ollama_provider_uses_http_and_auth_header(monkeypatch: Any) -> None:
     monkeypatch.setenv("OLLAMA_ENABLED", "true")
     monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com/api")
     monkeypatch.setenv("OLLAMA_API_KEY", "secret-token")
-    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+    monkeypatch.setenv("OLLAMA_MODEL", "verified-test-model")
 
     class _FakeResponse:
         def __init__(self, payload: str) -> None:
@@ -431,7 +434,7 @@ def test_ollama_provider_uses_http_and_auth_header(monkeypatch: Any) -> None:
         captured["timeout"] = timeout
         if request.full_url.endswith("/api/tags"):
             captured["tags_url"] = request.full_url
-            return _FakeResponse('{"models":[{"name":"qwen2.5:3b"}]}')
+            return _FakeResponse('{"models":[{"name":"verified-test-model"}]}')
         captured["url"] = request.full_url
         captured["body"] = json.loads(request.data.decode("utf-8"))
         return _FakeResponse('{"response":"{\\"answer\\":\\"ok\\",\\"used_facts\\":[],\\"used_causal_paths\\":[],\\"used_evidence_ids\\":[],\\"limitations\\":[]}"}')
@@ -444,7 +447,7 @@ def test_ollama_provider_uses_http_and_auth_header(monkeypatch: Any) -> None:
     assert captured["tags_url"] == "https://ollama.com/api/tags"
     assert captured["url"] == "https://ollama.com/api/generate"
     assert captured["auth"] == "Bearer secret-token"
-    assert captured["body"]["model"] == "qwen2.5:3b"
+    assert captured["body"]["model"] == "verified-test-model"
     assert captured["body"]["stream"] is False
 
 
@@ -454,7 +457,7 @@ def test_model_unavailable_does_not_attempt_generation_call(monkeypatch: Any) ->
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_ENABLED", "true")
     monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com")
-    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+    monkeypatch.setenv("OLLAMA_MODEL", "verified-test-model")
     monkeypatch.setenv("OLLAMA_ALLOW_UNLISTED_MODEL", "false")
 
     class _FakeResponse:
@@ -483,7 +486,7 @@ def test_model_unavailable_does_not_attempt_generation_call(monkeypatch: Any) ->
 
     monkeypatch.setattr(rs_module, "urlopen", _fake_urlopen)
     synthesizer = rs_module.ResponseSynthesizer()
-    with pytest.raises(RuntimeError, match="configured Ollama model unavailable: qwen2.5:3b"):
+    with pytest.raises(RuntimeError, match="configured Ollama model unavailable: verified-test-model"):
         synthesizer._invoke_ollama("test prompt")
     assert any(url.endswith("/api/tags") for url in called_urls)
     assert not any(url.endswith("/api/generate") for url in called_urls)
@@ -531,62 +534,40 @@ def test_auto_select_model_when_model_empty(monkeypatch: Any) -> None:
     assert captured["body"]["model"] == "model-a"
 
 
-def test_weaviate_probe_uses_http_meta(monkeypatch: Any) -> None:
+def test_health_payload_reports_mongodb_and_not_legacy_vector_components(monkeypatch: Any) -> None:
     import api.health as health_module
 
-    class _FakeResponse:
-        def __init__(self) -> None:
-            self.status = 200
-
-        def read(self, n: int = -1) -> bytes:
-            _ = n
-            return b'{"hostname":"weaviate"}'
-
-        def __enter__(self) -> "_FakeResponse":
-            return self
-
-        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-            _ = (exc_type, exc, tb)
-            return False
-
+    monkeypatch.setattr(health_module, "_neo4j_probe", lambda: {"ok": True, "detail": "ok"})
     monkeypatch.setattr(
         health_module,
-        "get_weaviate_config",
-        lambda: {
-            "url": "https://example.weaviate.cloud",
-            "grpc_host": "grpc.example.weaviate.cloud",
-            "grpc_port": "443",
-            "api_key": "test-key",
-        },
+        "_mongodb_probe",
+        lambda: {"ok": True, "detail": "ok database=healthlens_artifacts bucket=artifact_files"},
     )
+    monkeypatch.setattr(health_module, "_pinecone_probe", lambda: {"ok": True, "detail": "ok index=healthlens-knowledge namespace=production dimension=768 total_vector_count=13456"})
+    monkeypatch.setattr(health_module, "_artifact_probe", lambda: {"ok": True, "detail": "ok", "missing_required_count": 0, "missing_required": []})
+    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": True, "detail": "standby (LLM_PROVIDER=disabled)"})
 
-    captured: Dict[str, Any] = {}
-
-    def _fake_urlopen(request: Any, timeout: int = 0) -> _FakeResponse:
-        captured["url"] = request.full_url
-        captured["auth"] = request.headers.get("Authorization")
-        captured["timeout"] = timeout
-        return _FakeResponse()
-
-    monkeypatch.setattr(health_module, "urlopen", _fake_urlopen)
-    payload = health_module._weaviate_probe()
-    assert payload["ok"] is True
-    assert payload["detail"].startswith("ok")
-    assert captured["url"].endswith("/v1/meta")
-    assert captured["auth"] == "Bearer test-key"
+    payload = health_module.build_health_payload()
+    components = payload["components"]
+    assert payload["status"] == "healthy"
+    assert components["mongodb"]["ok"] is True
+    assert components["pinecone"]["ok"] is True
+    assert "weaviate" not in components
+    assert "supabase" not in components
 
 
 def test_health_not_degraded_when_ollama_disabled(monkeypatch: Any) -> None:
     import api.health as health_module
 
     monkeypatch.setattr(health_module, "_neo4j_probe", lambda: {"ok": True, "detail": "ok"})
-    monkeypatch.setattr(health_module, "_weaviate_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_mongodb_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_pinecone_probe", lambda: {"ok": True, "detail": "ok"})
     monkeypatch.setattr(health_module, "_artifact_probe", lambda: {"ok": True, "detail": "ok", "missing_required_count": 0, "missing_required": []})
-    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": True, "detail": "disabled"})
+    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": True, "detail": "standby (LLM_PROVIDER=disabled)"})
 
     payload = health_module.build_health_payload()
-    assert payload["status"] == "ok"
-    assert payload["components"]["ollama"]["detail"] == "disabled"
+    assert payload["status"] == "healthy"
+    assert payload["components"]["ollama"]["detail"] == "standby (LLM_PROVIDER=disabled)"
 
 
 def test_ollama_probe_does_not_require_cli() -> None:
@@ -773,20 +754,20 @@ def test_debug_true_includes_internal_payload() -> None:
     assert "guard" in debug
 
 
-def test_scientific_query_uses_near_vector_and_non_blocking_deterministic_synthesis(
+def test_scientific_query_uses_semantic_retrieval_and_non_blocking_deterministic_synthesis(
     monkeypatch: Any,
 ) -> None:
     import reasoning.response_synthesizer as rs_module
     from reasoning.hybrid_orchestrator import HybridOrchestrator
 
-    monkeypatch.setenv("VECTOR_BACKEND", "weaviate")
+    monkeypatch.setenv("VECTOR_BACKEND", "pinecone")
 
-    def _weaviate_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+    def _semantic_retrieval_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
         _ = (self, query, route)
         return (
             {
                 "status": "success",
-                "retrieval_backend": "weaviate_near_vector",
+                "retrieval_backend": "pinecone",
                 "top_k": 8,
                 "collections_searched": ["ScientificEvidence"],
                 "hit_count": 8,
@@ -842,7 +823,7 @@ def test_scientific_query_uses_near_vector_and_non_blocking_deterministic_synthe
         _ = (self, prompt)
         raise AssertionError("LLM should not be called in disabled scientific deterministic mode")
 
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", _weaviate_scientific)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", _semantic_retrieval_scientific)
     monkeypatch.setattr(rs_module.ResponseSynthesizer, "_invoke_ollama", _must_not_call_ollama)
     monkeypatch.setenv("LLM_PROVIDER", "disabled")
     monkeypatch.setenv("OLLAMA_ENABLED", "false")
@@ -857,13 +838,14 @@ def test_scientific_query_uses_near_vector_and_non_blocking_deterministic_synthe
     )
 
     debug = payload["debug"]
-    weaviate_debug = debug["orchestration"]["module_results"]["weaviate"]
+    retrieval_debug = debug["orchestration"]["module_results"]["semantic_retrieval"]
     synthesis_debug = debug["synthesis"]
     guard_debug = debug["guard"]
 
-    assert weaviate_debug["retrieval_backend"] == "weaviate_near_vector"
-    assert weaviate_debug["hit_count"] > 0
-    assert weaviate_debug["query_vector_dimension"] == 768
+    assert retrieval_debug["retrieval_backend"] == "pinecone"
+    assert retrieval_debug["hit_count"] > 0
+    assert retrieval_debug["query_vector_dimension"] == 768
+    assert "weaviate" not in debug["orchestration"]["module_results"]
     assert "ollama executable not found" not in json.dumps(synthesis_debug).lower()
     assert any("llm provider disabled; deterministic grounded synthesis used" in item.lower() for item in synthesis_debug["limitations"])
     assert synthesis_debug["model_backend"] == "deterministic_disabled"
@@ -879,14 +861,14 @@ def test_scientific_query_remote_ollama_failure_falls_back_cleanly(monkeypatch: 
     import reasoning.response_synthesizer as rs_module
     from reasoning.hybrid_orchestrator import HybridOrchestrator
 
-    monkeypatch.setenv("VECTOR_BACKEND", "weaviate")
+    monkeypatch.setenv("VECTOR_BACKEND", "pinecone")
 
-    def _weaviate_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+    def _semantic_retrieval_scientific(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
         _ = (self, query, route)
         return (
             {
                 "status": "success",
-                "retrieval_backend": "weaviate_near_vector",
+                "retrieval_backend": "pinecone",
                 "top_k": 8,
                 "collections_searched": ["ScientificEvidence"],
                 "hit_count": 8,
@@ -932,7 +914,7 @@ def test_scientific_query_remote_ollama_failure_falls_back_cleanly(monkeypatch: 
         _ = (self, prompt)
         raise RuntimeError("Ollama HTTP error: 503")
 
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", _weaviate_scientific)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", _semantic_retrieval_scientific)
     monkeypatch.setattr(rs_module.ResponseSynthesizer, "_invoke_ollama", _fail_remote)
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_ENABLED", "true")
@@ -949,11 +931,12 @@ def test_scientific_query_remote_ollama_failure_falls_back_cleanly(monkeypatch: 
     debug = payload["debug"]
     synthesis_debug = debug["synthesis"]
     guard_debug = debug["guard"]
-    weaviate_debug = debug["orchestration"]["module_results"]["weaviate"]
+    retrieval_debug = debug["orchestration"]["module_results"]["semantic_retrieval"]
     answer_lower = payload["answer"].lower()
 
-    assert weaviate_debug["retrieval_backend"] == "weaviate_near_vector"
-    assert weaviate_debug["hit_count"] > 0
+    assert retrieval_debug["retrieval_backend"] == "pinecone"
+    assert retrieval_debug["hit_count"] > 0
+    assert "weaviate" not in debug["orchestration"]["module_results"]
     assert payload["safe_for_display"] is True
     assert payload["advisor_fallback_used"] is False
     assert payload["synthesis_blocked"] is False

@@ -3,7 +3,8 @@ import type { AskResponse } from './types'
 const BANNED_TERMS = [
   'pbpk',
   'neo4j',
-  'weaviate',
+  'semantic retrieval',
+  'semantic_retrieval',
   'causal path',
   'graph',
   'vector',
@@ -38,7 +39,7 @@ export function formatMl(value: number | null): string {
 }
 
 export function healthLabel(status: string): 'Healthy' | 'Degraded' | 'Offline' {
-  if (status === 'ok') return 'Healthy'
+  if (status === 'healthy' || status === 'ok') return 'Healthy'
   if (status === 'degraded') return 'Degraded'
   return 'Offline'
 }

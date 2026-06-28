@@ -203,6 +203,7 @@ def test_restore_downloads_to_output_root_local_path_and_verifies_sha(tmp_path: 
                 {
                     "release": release,
                     "artifact_id": "artifact_1",
+                    "category": "core_processed_tables",
                     "local_path": "data/processed/payload.csv",
                     "sha256": expected_sha,
                     "required": True,

@@ -48,7 +48,7 @@ def _fast_deterministic_pipeline(monkeypatch: Any) -> None:
             ["Neo4j module unavailable in tests."],
         )
 
-    def _weaviate_stub(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+    def _semantic_retrieval_stub(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
         _ = (query, route)
         return (
             {
@@ -64,7 +64,7 @@ def _fast_deterministic_pipeline(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(ResponseSynthesizer, "_invoke_ollama", _force_model_fallback)
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", _neo4j_unavailable)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", _weaviate_stub)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", _semantic_retrieval_stub)
 
 
 def test_keep_drinking_query_contract() -> None:

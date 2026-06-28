@@ -55,7 +55,6 @@ MANDATORY_SAFETY_NOTES: Tuple[str, ...] = (
 BANNED_DEFAULT_TERMS: Tuple[str, ...] = (
     "pbpk",
     "neo4j",
-    "weaviate",
     "causal path",
     "confidence score",
     "source dataset",

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Mapping, Sequence
 from artifacts.artifact_manager import check_all_artifacts, load_manifest, write_local_manifest
 from artifacts.local_store import get_project_root, resolve_path, sha256 as compute_sha256, size_bytes as compute_size_bytes
 
-DEFAULT_SUPABASE_MAX_UPLOAD_MB = 45
+DEFAULT_ARTIFACT_MAX_UPLOAD_MB = 45
 
 
 def _clean_text(value: Any) -> str:
@@ -35,19 +35,19 @@ def build_remote_path(release_name: str, local_path: str) -> str:
 
 def get_max_upload_bytes(max_upload_mb: float | None = None) -> int:
     if max_upload_mb is None:
-        raw = _clean_text(os.getenv("SUPABASE_MAX_UPLOAD_MB", ""))
+        raw = _clean_text(os.getenv("ARTIFACT_MAX_UPLOAD_MB", ""))
         if raw:
             try:
                 parsed = float(raw)
             except ValueError:
-                parsed = float(DEFAULT_SUPABASE_MAX_UPLOAD_MB)
+                parsed = float(DEFAULT_ARTIFACT_MAX_UPLOAD_MB)
         else:
-            parsed = float(DEFAULT_SUPABASE_MAX_UPLOAD_MB)
+            parsed = float(DEFAULT_ARTIFACT_MAX_UPLOAD_MB)
     else:
         parsed = float(max_upload_mb)
 
     if parsed <= 0:
-        parsed = float(DEFAULT_SUPABASE_MAX_UPLOAD_MB)
+        parsed = float(DEFAULT_ARTIFACT_MAX_UPLOAD_MB)
     return int(parsed * 1024 * 1024)
 
 
@@ -118,8 +118,8 @@ def chunk_artifact_for_release(
         "chunk_count": len(chunks),
         "chunks": chunks,
         "restore_command_hint": (
-            f"PYTHONPATH=backend python3 backend/scripts/artifact_download_supabase.py "
-            f"--release {release_name} --execute"
+            f"PYTHONPATH=backend python3 backend/scripts/artifact_download_mongodb.py "
+            f"--release {release_name} --output-root /tmp --required-only --force"
         ),
     }
 

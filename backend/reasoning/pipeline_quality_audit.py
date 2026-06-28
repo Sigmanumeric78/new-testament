@@ -38,7 +38,6 @@ MANUAL_REGRESSION_QUERIES: Tuple[str, ...] = (
 BANNED_PRETTY_TERMS: Tuple[str, ...] = (
     "pbpk",
     "neo4j",
-    "weaviate",
     "causal path",
     "adh",
     "aldh",

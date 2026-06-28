@@ -4,14 +4,15 @@ set -euo pipefail
 API_BASE_URL="${API_BASE_URL:-http://localhost:8000}"
 FRONTEND_URL="${FRONTEND_URL:-http://localhost:5173}"
 OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-}"
 
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-90}"
 PREWARM_OLLAMA="${PREWARM_OLLAMA:-false}"
 
 print_timeout_diagnostics() {
-  echo "Request timed out. This usually means Ollama/Qwen is cold-starting or the backend is still generating." >&2
-  echo "Try: ollama run qwen2.5:3b 'ready'" >&2
+  echo "Request timed out. This usually means the backend is still restoring artifacts or generating." >&2
+  echo "If Ollama is enabled, verify OLLAMA_MODEL is available on the configured endpoint." >&2
   echo "Or rerun with: CURL_TIMEOUT=120 ./scripts/fullstack_acceptance_check.sh" >&2
 }
 
@@ -35,16 +36,20 @@ maybe_prewarm_ollama() {
   case "${PREWARM_OLLAMA}" in
     true|TRUE|True|1|yes|YES|Yes)
       echo "[0/7] Optional Ollama prewarm enabled"
+      if [[ -z "${OLLAMA_MODEL}" ]]; then
+        echo "WARN: PREWARM_OLLAMA requested but OLLAMA_MODEL is empty. Continuing without prewarm." >&2
+        return 0
+      fi
       if curl -fsS --max-time "$HEALTH_TIMEOUT" \
         -H "Content-Type: application/json" \
-        -d '{"model":"qwen2.5:3b","prompt":"ready","stream":false}' \
+        -d "{\"model\":\"${OLLAMA_MODEL}\",\"prompt\":\"ready\",\"stream\":false}" \
         "${OLLAMA_BASE_URL}/api/generate" >/dev/null 2>&1; then
         echo "ollama_prewarm=ok_http"
         return 0
       fi
 
       if command -v ollama >/dev/null 2>&1; then
-        if ollama run qwen2.5:3b "ready" >/dev/null 2>&1; then
+        if ollama run "${OLLAMA_MODEL}" "ready" >/dev/null 2>&1; then
           echo "ollama_prewarm=ok_cli"
         else
           echo "WARN: Ollama prewarm failed via CLI. Continuing without prewarm." >&2

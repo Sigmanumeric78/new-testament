@@ -1,7 +1,7 @@
 """Phase 08D deterministic grounding and safety guard.
 
 This guard validates synthesized response payloads before user display.
-It does not execute PBPK/Neo4j/Weaviate/Ollama directly.
+It does not execute PBPK/Neo4j/semantic retrieval/Ollama directly.
 """
 
 from __future__ import annotations

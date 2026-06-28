@@ -13,15 +13,17 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() else BACKEND_ROOT
+REPO_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from artifacts.artifact_manager import is_runtime_artifact_record  # noqa: E402
 from artifacts.local_store import resolve_path  # noqa: E402
 from artifacts.release_manifest import default_release_dir  # noqa: E402
-from artifacts.supabase_store import SupabaseArtifactStore  # noqa: E402
+from supabase_store import SupabaseArtifactStore  # noqa: E402
 
 
 def _clean_text(value: Any) -> str:

@@ -21,7 +21,6 @@ router = APIRouter()
 BANNED_INTERNAL_TERMS = (
     "PBPK",
     "Neo4j",
-    "Weaviate",
     "causal path",
     "graph",
     "embedding",

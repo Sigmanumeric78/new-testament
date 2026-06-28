@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 import subprocess
 import sys
@@ -43,7 +42,7 @@ def test_manifest_loads_from_example() -> None:
     assert len(specs) >= 30
     ids = {spec.artifact_id for spec in specs}
     assert "core_master_beverage_reference_repaired" in ids
-    assert "weaviate_schema_design" in ids
+    assert "weaviate_emb_scientific_evidence" in ids
 
 
 def test_project_root_respects_project_root_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,7 +64,7 @@ def test_manifest_schema_design_paths_point_to_backend_monorepo() -> None:
     by_id = {spec.artifact_id: spec for spec in specs}
 
     assert by_id["neo4j_graph_schema_design"].local_path == "backend/rag/neo4j/neo4j_graph_schema_design.md"
-    assert by_id["weaviate_schema_design"].local_path == "backend/rag/weaviate/weaviate_schema_design.md"
+    assert by_id["weaviate_schema_design"].local_path == "tools/legacy_migrations/weaviate/weaviate_schema_design.md"
 
 
 def test_manifest_schema_design_files_validate_when_present() -> None:
@@ -89,7 +88,7 @@ def test_runtime_filter_includes_schema_design_inputs() -> None:
     runtime_specs = filter_runtime_specs(specs)
     runtime_ids = {spec.artifact_id for spec in runtime_specs}
     assert "neo4j_graph_schema_design" in runtime_ids
-    assert "weaviate_schema_design" in runtime_ids
+    assert "weaviate_schema_design" not in runtime_ids
 
 
 def test_runtime_filter_includes_scientific_embedding_for_lambda_fallback() -> None:
@@ -149,180 +148,6 @@ def test_query_vector_builder_uses_lambda_data_root(monkeypatch: pytest.MonkeyPa
     assert details["query_vector_dimension"] == 3
     assert details["query_vector_source"] == "embedded_corpus_weighted_average"
     assert details["query_vector_seed_rows"] >= 1
-
-
-def test_weaviate_retrieval_uses_near_vector(monkeypatch: pytest.MonkeyPatch) -> None:
-    import reasoning.hybrid_orchestrator as orchestrator_module
-
-    class FakeMetadata:
-        score = None
-        distance = 0.05
-        certainty = None
-
-    class FakeObject:
-        properties = {
-            "object_id": "evidence-1",
-            "chunk_id": "chunk-1",
-            "collection": "ScientificEvidence",
-            "title": "Sulfites and alcohol headaches",
-            "content": "Sulfites may be relevant to headache reports in sensitive people.",
-            "metadata": "{}",
-            "provenance": "{}",
-        }
-        metadata = FakeMetadata()
-
-    class FakeResponse:
-        objects = [FakeObject()]
-
-    class FakeQuery:
-        def __init__(self) -> None:
-            self.near_vector_calls: List[Dict[str, Any]] = []
-
-        def near_vector(self, **kwargs: Any) -> FakeResponse:
-            self.near_vector_calls.append(kwargs)
-            return FakeResponse()
-
-        def hybrid(self, *_args: Any, **_kwargs: Any) -> None:
-            raise AssertionError("near_vector must be used instead of hybrid/near_text")
-
-        def near_text(self, *_args: Any, **_kwargs: Any) -> None:
-            raise AssertionError("near_text must not be used for vectorizer-none collections")
-
-    class FakeCollection:
-        def __init__(self) -> None:
-            self.query = FakeQuery()
-
-    fake_collection = FakeCollection()
-
-    class FakeCollections:
-        def exists(self, _name: str) -> bool:
-            return True
-
-        def get(self, _name: str) -> FakeCollection:
-            return fake_collection
-
-    class FakeClient:
-        collections = FakeCollections()
-
-        def is_ready(self) -> bool:
-            return True
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(
-        orchestrator_module,
-        "get_weaviate_config",
-        lambda: {
-            "url": "https://example.weaviate.cloud",
-            "grpc_host": "grpc-example.weaviate.cloud",
-            "grpc_port": "443",
-            "api_key": "loaded",
-        },
-    )
-    monkeypatch.setattr(orchestrator_module, "weaviate", object())
-    monkeypatch.setattr(HybridOrchestrator, "_connect_weaviate", lambda self, config: FakeClient())
-    monkeypatch.setattr(
-        HybridOrchestrator,
-        "_build_query_vector",
-        lambda self, query, collections: (
-            [0.001] * 768,
-            {
-                "query_vector_source": "test_vector",
-                "query_vector_dimension": 768,
-                "query_vector_seed_rows": 1,
-                "query_vector_seed_overlap_max": 1,
-            },
-        ),
-    )
-
-    result, limitations = HybridOrchestrator()._execute_weaviate(
-        "Show research on sulfites and alcohol headaches",
-        {"intent": "scientific_evidence"},
-    )
-
-    assert result["status"] == "success"
-    assert result["retrieval_backend"] == "weaviate_near_vector"
-    assert result["hit_count"] == 1
-    assert result["query_vector_dimension"] == 768
-    assert fake_collection.query.near_vector_calls
-    assert "query" not in fake_collection.query.near_vector_calls[0]
-    assert not any("VectorFromInput" in item for item in limitations)
-
-
-def test_weaviate_near_vector_failure_uses_embedded_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    import reasoning.hybrid_orchestrator as orchestrator_module
-
-    class FakeQuery:
-        def near_vector(self, **_kwargs: Any) -> None:
-            raise RuntimeError("cloud query unavailable")
-
-    class FakeCollection:
-        query = FakeQuery()
-
-    class FakeCollections:
-        def exists(self, _name: str) -> bool:
-            return True
-
-        def get(self, _name: str) -> FakeCollection:
-            return FakeCollection()
-
-    class FakeClient:
-        collections = FakeCollections()
-
-        def is_ready(self) -> bool:
-            return True
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(
-        orchestrator_module,
-        "get_weaviate_config",
-        lambda: {"url": "https://example.weaviate.cloud", "grpc_host": "grpc", "grpc_port": "443", "api_key": "loaded"},
-    )
-    monkeypatch.setattr(orchestrator_module, "weaviate", object())
-    monkeypatch.setattr(HybridOrchestrator, "_connect_weaviate", lambda self, config: FakeClient())
-    monkeypatch.setattr(
-        HybridOrchestrator,
-        "_build_query_vector",
-        lambda self, query, collections: (
-            [0.001] * 768,
-            {"query_vector_source": "test_vector", "query_vector_dimension": 768},
-        ),
-    )
-    monkeypatch.setattr(
-        HybridOrchestrator,
-        "_embedded_fallback_search",
-        lambda self, query, collections, top_k: [
-            {
-                "object_id": "fallback-1",
-                "collection": "ScientificEvidence",
-                "title": "Sulfites headache evidence",
-                "content_excerpt": "Sulfites and headache evidence.",
-                "score": 1.0,
-                "distance": None,
-                "source_dataset": "",
-                "source_file": "",
-            }
-        ],
-    )
-
-    result, limitations = HybridOrchestrator()._execute_weaviate(
-        "Show research on sulfites and alcohol headaches",
-        {"intent": "scientific_evidence"},
-    )
-
-    assert result["retrieval_backend"] == "embedded_fallback"
-    assert result["hit_count"] == 1
-    assert any("Weaviate query failed" in item for item in limitations)
-
-
-def test_weaviate_execution_source_uses_near_vector_not_near_text() -> None:
-    source = inspect.getsource(HybridOrchestrator._execute_weaviate)
-    assert ".near_vector(" in source
-    assert ".near_text(" not in source
-    assert ".hybrid(" not in source
 
 
 def test_manifest_schema_design_files_validate_with_explicit_project_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -564,7 +389,8 @@ def test_missing_artifacts_degrade_health_without_crash(monkeypatch: Any, tmp_pa
 
     monkeypatch.setattr(health_module, "ARTIFACT_MANIFEST_PATH", manifest_path)
     monkeypatch.setattr(health_module, "_neo4j_probe", lambda: health_module._component(True, "ok"))
-    monkeypatch.setattr(health_module, "_weaviate_probe", lambda: health_module._component(True, "ok"))
+    monkeypatch.setattr(health_module, "_mongodb_probe", lambda: health_module._component(True, "ok"))
+    monkeypatch.setattr(health_module, "_pinecone_probe", lambda: health_module._component(True, "ok"))
     monkeypatch.setattr(health_module, "_ollama_probe", lambda: health_module._component(True, "ok"))
 
     payload = health_module.build_health_payload()

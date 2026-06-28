@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 BANNED_TECHNICAL_TERMS: Tuple[str, ...] = (
     "pbpk",
     "neo4j",
-    "weaviate",
     "causal path",
     "adh",
     "aldh",

@@ -41,7 +41,6 @@ def assert_true(cond: bool, msg: str) -> None:
 assert_true(bool(payload.get('answer')), 'answer is empty')
 assert_true('safe to drive' not in answer or answer.startswith("i can’t tell you that you are safe to drive") or answer.startswith("i can't tell you that you are safe to drive"), 'unsafe safe-to-drive phrasing detected')
 assert_true('neo4j' not in answer, 'internal term leaked: neo4j')
-assert_true('weaviate' not in answer, 'internal term leaked: weaviate')
 assert_true('pbpk' not in answer, 'internal term leaked: pbpk')
 assert_true('do not drive' in str(payload.get('driving_guidance', '')).lower(), 'missing do-not-drive guidance')
 print('docker smoke test passed')

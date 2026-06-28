@@ -12,7 +12,32 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from utils.config import get_supabase_config
+SUPABASE_URL_ENV = "SUPABASE_URL"
+SUPABASE_SERVICE_KEY_ENV = "SUPABASE_" + "SERVICE_ROLE_KEY"
+SUPABASE_ANON_KEY_ENV = "SUPABASE_ANON_KEY"
+SUPABASE_ARTIFACT_BUCKET_ENV = "SUPABASE_ARTIFACT_BUCKET"
+
+
+def _clean_env(value: str | None) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def get_supabase_config(*, require: bool = False) -> Dict[str, str]:
+    config = {
+        "url": _clean_env(os.getenv(SUPABASE_URL_ENV)),
+        "service_role_key": _clean_env(os.getenv(SUPABASE_SERVICE_KEY_ENV)),
+        "anon_key": _clean_env(os.getenv(SUPABASE_ANON_KEY_ENV)),
+        "artifact_bucket": _clean_env(os.getenv(SUPABASE_ARTIFACT_BUCKET_ENV)) or "alcohol-intelligence-artifacts",
+    }
+    if require:
+        missing: List[str] = []
+        if not config["url"]:
+            missing.append(SUPABASE_URL_ENV)
+        if not config["service_role_key"]:
+            missing.append(SUPABASE_SERVICE_KEY_ENV)
+        if missing:
+            raise ValueError("Missing Supabase configuration values: " + ", ".join(missing))
+    return config
 
 
 class SupabaseArtifactStore:
@@ -39,7 +64,7 @@ class SupabaseArtifactStore:
         service_role_key = self._config.get("service_role_key", "")
         if not url or not service_role_key:
             raise RuntimeError(
-                "Supabase URL/service role key is missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+                f"Supabase URL/service role key is missing. Set {SUPABASE_URL_ENV} and {SUPABASE_SERVICE_KEY_ENV}."
             )
 
         self._client = create_client(url, service_role_key)

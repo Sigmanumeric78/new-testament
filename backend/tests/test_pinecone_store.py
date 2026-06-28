@@ -158,7 +158,7 @@ def test_orchestrator_uses_pinecone_when_configured(monkeypatch: pytest.MonkeyPa
         ),
     )
 
-    result, limitations = HybridOrchestrator()._execute_vector_retrieval(
+    result, limitations = HybridOrchestrator()._execute_semantic_retrieval(
         "Show research on sulfites and alcohol headaches",
         {"intent": "scientific_evidence"},
     )
@@ -208,7 +208,7 @@ def test_orchestrator_falls_back_when_pinecone_fails(monkeypatch: pytest.MonkeyP
         ],
     )
 
-    result, limitations = HybridOrchestrator()._execute_vector_retrieval(
+    result, limitations = HybridOrchestrator()._execute_semantic_retrieval(
         "Show research on sulfites and alcohol headaches",
         {"intent": "scientific_evidence"},
     )
@@ -223,12 +223,14 @@ def test_health_adds_pinecone_component_only_when_enabled(monkeypatch: pytest.Mo
 
     monkeypatch.setenv("VECTOR_BACKEND", "pinecone")
     monkeypatch.setattr(health_module, "_neo4j_probe", lambda: {"ok": True, "detail": "ok"})
+    monkeypatch.setattr(health_module, "_mongodb_probe", lambda: {"ok": True, "detail": "ok"})
     monkeypatch.setattr(health_module, "_artifact_probe", lambda: {"ok": True, "detail": "ok", "missing_required_count": 0, "missing_required": []})
-    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": True, "detail": "disabled"})
+    monkeypatch.setattr(health_module, "_ollama_probe", lambda: {"ok": True, "detail": "standby (LLM_PROVIDER=disabled)"})
     monkeypatch.setattr(health_module, "_pinecone_probe", lambda: {"ok": True, "detail": "ok"})
 
     payload = health_module.build_health_payload()
 
-    assert payload["status"] == "ok"
+    assert payload["status"] == "healthy"
     assert payload["components"]["pinecone"]["ok"] is True
-    assert payload["components"]["weaviate"]["detail"] == "standby (VECTOR_BACKEND=pinecone)"
+    assert "mongodb" in payload["components"]
+    assert "weaviate" not in payload["components"]

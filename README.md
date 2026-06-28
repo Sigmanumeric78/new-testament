@@ -1,91 +1,46 @@
-# Alcohol Intelligence Monorepo
+# HealthLens Alcohol Intelligence
 
-Local-first alcohol risk estimation and safety guidance system with deterministic guards.
+Production FastAPI/Lambda backend and React frontend for alcohol risk estimation, chemical exploration, grounded scientific retrieval, and conservative safety guidance.
 
-## Safety Disclaimer
+## Safety
 - Estimates only.
 - Not medical advice.
-- Not legal/driving advice.
+- Not legal or driving advice.
 - Never use this system to decide whether it is safe to drive.
 
-## Monorepo Layout
-- `backend/`: FastAPI backend, reasoning pipeline, simulation, RAG integration, scripts, tests, Docker config.
-- `frontend/`: React + TypeScript + Vite user interface (Zer0 G0nd0g0l).
-- `infra/`: Placeholder docs for Docker/CI/CD/Azure/DNS setup.
-- `docs/`: Architecture, memory, deployment planning.
-- `data/artifact_manifest.example.json`: committed lightweight artifact manifest only.
+## Architecture
+- Frontend: AWS Amplify, React, TypeScript, Vite.
+- Backend: FastAPI in an AWS Lambda container image.
+- Artifact storage: MongoDB Atlas GridFS.
+- Vector retrieval: Pinecone.
+- Graph database: Neo4j Aura.
+- Generation: verified remote Ollama model when enabled; deterministic grounded synthesis when Ollama is disabled or unavailable.
 
-## Backend Architecture
+## Backend Components
 - PBPK simulator: `backend/simulation/pbpk/pbpk_master_simulator.py`
-- Neo4j causal graph integration
-- Weaviate semantic retrieval
-- Qwen2.5 3B via Ollama (grounded synthesis)
-- Grounding/safety guard before user display
-- User risk advisor for plain-language conservative guidance
-- Chemical Explorer API for compound search/detail/conformer retrieval
+- Semantic retrieval: Pinecone index `healthlens-knowledge`, namespace `production`, dimension `768`.
+- Neo4j causal graph integration.
+- Grounding and safety guard before user display.
+- User risk advisor for plain-language conservative guidance.
+- Chemical Explorer API for compound search, detail, and conformer retrieval.
 
-## Local Services
-- Neo4j
-- Weaviate
-- Ollama with `qwen2.5:3b`
+## Environment
+Copy `.env.example` to a local ignored env file and fill secrets outside Git.
 
-## Setup
-1. Copy env file:
-   - `cp .env.example .env`
-2. Install backend dependencies:
-   - `pip install -r backend/requirements.txt`
-3. Start Neo4j and Weaviate locally.
-4. Ensure Ollama is running:
-   - `ollama pull qwen2.5:3b`
+Current runtime selectors:
+
+```bash
+ARTIFACT_STORE_BACKEND=mongodb
+VECTOR_BACKEND=pinecone
+```
+
+Unsupported selector values fail at startup/configuration with a clear error.
 
 ## Run Backend API
 ```bash
 cd backend
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-## Chemical Explorer Endpoints
-- `GET /chemicals`
-- `GET /chemicals/{compound_id}`
-- `GET /chemicals/{compound_id}/conformer`
-
-These endpoints are read-only and built from local processed beverage compound data and local PubChem JSON/SDF structure files.
-
-## Local Full-Stack Development
-Terminal 1:
-```bash
-cd backend
 PYTHONPATH=. uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-
-Terminal 2:
-```bash
-cd frontend
-npm run dev
-```
-
-Terminal 3:
-```bash
-./scripts/fullstack_acceptance_check.sh
-```
-
-Recommended when Ollama may be cold:
-```bash
-PREWARM_OLLAMA=true CURL_TIMEOUT=120 ./scripts/fullstack_acceptance_check.sh
-```
-
-Open `http://localhost:5173`.
-
-Routes:
-- `/` Ask and intake workflow
-- `/explorer` Chemical Explorer (compound catalog + conformer viewer)
-
-If port 5173 is in use:
-```bash
-lsof -i :5173
-kill <PID>
-```
-Then restart the frontend dev server.
 
 ## Run Backend Tests
 ```bash
@@ -99,91 +54,84 @@ npm install
 npm run dev
 ```
 
-## Docker (Local)
+Open `http://localhost:5173`.
+
+Routes:
+- `/` Ask and intake workflow.
+- `/explorer` Chemical Explorer.
+
+## Docker
 ```bash
 docker compose -f backend/docker-compose.local.yml up --build
 ```
 
 Manual `docker run` should set:
 - `PROJECT_ROOT=/app`
-- `DATA_ROOT=/app/data`
+- `DATA_ROOT=/app/data` for local Docker, `/tmp/data` for Lambda.
 - `PYTHONPATH=/app/backend`
-- `RESTORE_ARTIFACTS_ON_STARTUP=false` (default)
-- `ARTIFACT_RELEASE=v0.6-chemical-explorer` (default)
+- `ARTIFACT_STORE_BACKEND=mongodb`
+- `VECTOR_BACKEND=pinecone`
+- `RESTORE_ARTIFACTS_ON_STARTUP=true` when testing artifact restore.
+- `ARTIFACT_RESTORE_MODE=background`
+- `ARTIFACT_RELEASE=v0.6-chemical-explorer`
 
-To test Supabase restore-on-startup (no local `data/` mount):
+Startup restore uses MongoDB Atlas GridFS and restores only the runtime-required artifact subset.
 
-```bash
-docker run --rm \
-  --name alcohol-intelligence-api-test \
-  --network host \
-  --env-file .env \
-  -e PROJECT_ROOT=/app \
-  -e DATA_ROOT=/app/data \
-  -e RESTORE_ARTIFACTS_ON_STARTUP=true \
-  -e ARTIFACT_RELEASE=v0.6-chemical-explorer \
-  -e PYTHONPATH=/app/backend \
-  alcohol-intelligence-api:local
+## Health
+`GET /health` reports these production components:
+- `api`
+- `neo4j`
+- `mongodb`
+- `artifact_status`
+- `pinecone`
+- `ollama`
+- `pbpk`
+- `router`
+- `orchestrator`
+- `synthesizer`
+- `grounding_guard`
+- `user_risk_advisor`
+
+The health response must not include legacy storage or vector components. A deliberately disabled LLM reports as Ollama standby and does not degrade platform health.
+
+## API Debug Shape
+Semantic retrieval appears under `semantic_retrieval`:
+
+```json
+{
+  "debug": {
+    "route": {
+      "required_modules": ["semantic_retrieval"]
+    },
+    "orchestration": {
+      "module_results": {
+        "semantic_retrieval": {
+          "retrieval_backend": "pinecone",
+          "query_vector_dimension": 768
+        }
+      }
+    }
+  }
+}
 ```
-
-Startup behavior when restore mode is enabled:
-- Downloads release manifest from Supabase.
-- Restores runtime artifacts (runtime-only subset by default).
-- Reassembles chunked artifacts if needed.
-- Verifies checksums before API starts.
-- Fails fast if required runtime artifacts cannot be restored.
-
-Frontend image (static Nginx):
-
-```bash
-docker build \
-  -f frontend/Dockerfile \
-  -t alcohol-intelligence-frontend:local \
-  --build-arg VITE_API_BASE_URL=http://localhost:8000 \
-  frontend
-
-docker run --rm \
-  --name alcohol-intelligence-frontend-test \
-  -p 5173:80 \
-  alcohol-intelligence-frontend:local
-```
-
-Open `http://localhost:5173`.
 
 ## Useful Commands
 ```bash
 PYTHONPATH=backend python3 backend/app_cli.py --health
 PYTHONPATH=backend python3 backend/app_cli.py --demo
-PYTHONPATH=backend python3 backend/app_cli.py --query "I am 75 kg male, fed, I drank 200 ml vodka in 1 hour, should I keep drinking?" --pretty
+PYTHONPATH=backend python3 backend/app_cli.py --query "Show research on sulfites and alcohol headaches" --pretty
 PYTHONPATH=backend python3 backend/app_cli.py --intake
 ```
 
 ## Artifact Policy
 - GitHub stores code, tests, docs, and lightweight reproducible metadata.
-- Large/raw/generated artifacts stay outside Git (planned Supabase Storage workflow).
-- See `ARTIFACTS.md` and `docs/supabase_artifact_plan.md`.
+- Large, raw, generated, and restored artifacts stay outside Git.
+- Runtime artifact restore comes from MongoDB Atlas GridFS.
+- Old artifact IDs or paths may contain historical backend names; do not rename or delete them unless runtime consumption and checksums are fully validated.
 
-## Supabase Artifact Workflow (Phase 09E)
-```bash
-PYTHONPATH=backend python3 backend/scripts/create_release_bundle.py --release v0.1-local-intelligence
-PYTHONPATH=backend python3 backend/scripts/artifact_upload_supabase.py --release v0.1-local-intelligence --dry-run
-PYTHONPATH=backend python3 backend/scripts/artifact_download_supabase.py --release v0.1-local-intelligence --dry-run
-PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py --release v0.1-local-intelligence
-```
+## Legacy Migrations
+Completed migrations:
+- Supabase Storage to MongoDB Atlas/GridFS.
+- Weaviate Cloud to Pinecone.
 
-Use `--execute` only when you intentionally want live Supabase uploads/downloads.
-Oversized artifacts are auto-chunked using `SUPABASE_MAX_UPLOAD_MB` (default `45`), and reassembled on download with SHA256 verification.
-
-Runtime restore commands:
-
-```bash
-PYTHONPATH=backend python3 backend/scripts/artifact_download_supabase.py \
-  --release v0.6-chemical-explorer \
-  --execute \
-  --overwrite \
-  --runtime-only
-
-PYTHONPATH=backend python3 backend/scripts/artifact_verify_release.py \
-  --release v0.6-chemical-explorer \
-  --runtime-only
-```
+Retained legacy migration utilities live under `tools/legacy_migrations/` and are not used in production runtime or copied into the Lambda image.

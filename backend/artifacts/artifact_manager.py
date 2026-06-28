@@ -20,12 +20,10 @@ from artifacts.manifest import ArtifactSpec, ArtifactStatus
 RUNTIME_REQUIRED_CATEGORIES = {
     "core_processed_tables",
     "neo4j_initialization_inputs",
-    "weaviate_materialized_jsonl",
-    "weaviate_schema_design_inputs",
 }
 RUNTIME_REQUIRED_ARTIFACT_IDS = {
     "neo4j_graph_schema_design",
-    "weaviate_schema_design",
+    # Retained for semantic query-vector construction and deterministic fallback retrieval.
     "weaviate_emb_scientific_evidence",
 }
 RUNTIME_EXCLUDED_PREFIXES = (

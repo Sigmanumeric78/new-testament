@@ -22,14 +22,14 @@ def _orchestrator_payload_for_query(query: str) -> Dict[str, Any]:
             "route": {
                 "intent": "mechanistic_explanation",
                 "sub_intents": ["causal_why", "relative_potency_mechanism"],
-                "required_modules": ["neo4j", "weaviate"],
+                "required_modules": ["neo4j", "semantic_retrieval"],
                 "required_inputs": {},
                 "missing_required_inputs": [],
                 "response_style": "layman",
                 "confidence": 0.92,
                 "routing_reasoning": ["deterministic route"],
             },
-            "module_results": {"pbpk": None, "neo4j": {}, "weaviate": {}, "toxicity": None},
+            "module_results": {"pbpk": None, "neo4j": {}, "semantic_retrieval": {}, "toxicity": None},
             "evidence_bundle": {
                 "key_facts": [
                     "Whisky commonly has higher ABV than beer.",
@@ -72,7 +72,7 @@ def _orchestrator_payload_for_query(query: str) -> Dict[str, Any]:
                 "confidence": 0.94,
                 "routing_reasoning": ["deterministic route"],
             },
-            "module_results": {"pbpk": {}, "neo4j": None, "weaviate": None, "toxicity": None},
+            "module_results": {"pbpk": {}, "neo4j": None, "semantic_retrieval": None, "toxicity": None},
             "evidence_bundle": {
                 "key_facts": [
                     "PBPK estimated peak BAC around 0.081.",
@@ -121,14 +121,14 @@ def _orchestrator_payload_for_query(query: str) -> Dict[str, Any]:
             "route": {
                 "intent": "toxicity_risk",
                 "sub_intents": ["headache_risk"],
-                "required_modules": ["neo4j", "weaviate", "toxicity"],
+                "required_modules": ["neo4j", "semantic_retrieval", "toxicity"],
                 "required_inputs": {},
                 "missing_required_inputs": [],
                 "response_style": "layman",
                 "confidence": 0.9,
                 "routing_reasoning": ["deterministic route"],
             },
-            "module_results": {"pbpk": None, "neo4j": {}, "weaviate": {}, "toxicity": {}},
+            "module_results": {"pbpk": None, "neo4j": {}, "semantic_retrieval": {}, "toxicity": {}},
             "evidence_bundle": {
                 "key_facts": [
                     "Toxicity evidence identified risk compounds and risk types.",
@@ -168,14 +168,14 @@ def _orchestrator_payload_for_query(query: str) -> Dict[str, Any]:
             "route": {
                 "intent": "scientific_evidence",
                 "sub_intents": ["literature_retrieval"],
-                "required_modules": ["weaviate"],
+                "required_modules": ["semantic_retrieval"],
                 "required_inputs": {},
                 "missing_required_inputs": [],
                 "response_style": "layman",
                 "confidence": 0.95,
                 "routing_reasoning": ["deterministic route"],
             },
-            "module_results": {"pbpk": None, "neo4j": None, "weaviate": {}, "toxicity": None},
+            "module_results": {"pbpk": None, "neo4j": None, "semantic_retrieval": {}, "toxicity": None},
             "evidence_bundle": {
                 "key_facts": [
                     "Retrieved scientific evidence includes sulfite-related studies.",

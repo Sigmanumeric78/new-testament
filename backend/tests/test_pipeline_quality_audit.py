@@ -75,7 +75,7 @@ def _safe_pipeline_payload(query: str) -> Dict[str, Any]:
         "grounding_score": 0.9,
         "safety_score": 1.0,
         "intent": "simulation",
-        "modules_used": ["pbpk", "weaviate"],
+        "modules_used": ["pbpk", "semantic_retrieval"],
         "confidence_score": 0.82,
         "user_risk_advice": advice,
         "guard_output": {},

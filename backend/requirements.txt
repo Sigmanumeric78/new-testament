@@ -6,11 +6,8 @@ pandas
 numpy
 scipy
 neo4j
-weaviate-client
 pyarrow
-pypdf
-pytest
-httpx
-supabase
 pymongo
+dnspython
+certifi
 pinecone>=9.1.0

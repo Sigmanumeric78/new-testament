@@ -14,6 +14,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from artifacts.artifact_manager import is_runtime_artifact_record  # noqa: E402
 from artifacts.mongodb_store import ARTIFACT_SOURCE, MongoArtifactStore, clean_text  # noqa: E402
 
 
@@ -93,7 +94,11 @@ def restore_release(
 
     entries = store.list_release_artifacts(release, required_only=required_only)
     if required_only:
-        entries = [entry for entry in entries if bool_value(entry.get("required"), default=True)]
+        entries = [
+            entry
+            for entry in entries
+            if bool_value(entry.get("required"), default=True) and is_runtime_artifact_record(entry)
+        ]
 
     restored: List[str] = []
     skipped_existing: List[str] = []

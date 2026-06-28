@@ -11,13 +11,15 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() else BACKEND_ROOT
+REPO_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from scripts.export_neo4j_data import DEFAULT_RELEASE, expected_neo4j_files, runtime_export_root
-from scripts.export_weaviate_data import expected_weaviate_files
+from export_weaviate_data import expected_weaviate_files
 
 
 def _sha256(path: Path) -> str:

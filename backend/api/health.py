@@ -19,7 +19,7 @@ from reasoning.query_router import route_query
 from reasoning.response_synthesizer import ResponseSynthesizer
 from reasoning.user_risk_advisor import build_user_risk_advice
 from simulation.pbpk import pbpk_master_simulator
-from utils.config import get_neo4j_config, get_ollama_config, get_vector_backend, get_weaviate_config, resolve_project_path
+from utils.config import get_mongodb_config, get_neo4j_config, get_ollama_config, get_vector_backend, resolve_project_path
 from vectorstores.pinecone_store import PineconeVectorStore
 
 router = APIRouter()
@@ -72,6 +72,11 @@ def _artifact_component(
     if _clean_text(artifact_state):
         payload["status"] = _clean_text(artifact_state)
     if restore_status is not None:
+        payload["backend"] = _clean_text(restore_status.get("backend")) or "mongodb"
+        payload["release"] = _clean_text(restore_status.get("release"))
+        payload["started_at"] = _clean_text(restore_status.get("started_at"))
+        payload["completed_at"] = _clean_text(restore_status.get("completed_at"))
+        payload["restored_count"] = int(restore_status.get("restored_count", 0) or 0)
         payload["restore_status"] = {
             "status": _clean_text(restore_status.get("status")) or "idle",
             "started_at": _clean_text(restore_status.get("started_at")),
@@ -102,28 +107,28 @@ def _neo4j_probe() -> Dict[str, Any]:
         return _component(False, str(exc))
 
 
-def _weaviate_probe() -> Dict[str, Any]:
+def _mongodb_probe() -> Dict[str, Any]:
     try:
-        config = get_weaviate_config()
-        base_url = _clean_text(config.get("url"))
-        grpc_host = _clean_text(config.get("grpc_host")) or "localhost"
-        grpc_port = int(_clean_text(config.get("grpc_port")) or "50051")
-        api_key = _clean_text(config.get("api_key"))
-        if not base_url:
-            return _component(False, "WEAVIATE_URL is missing")
-        meta_url = urljoin(base_url.rstrip("/") + "/", "v1/meta")
-        req = Request(url=meta_url, method="GET")
-        if api_key:
-            req.add_header("Authorization", f"Bearer {api_key}")
-        with urlopen(req, timeout=6) as response:  # noqa: S310 - URL comes from local env config
-            status = int(getattr(response, "status", 200))
-            _ = response.read(1024)
-        if status != 200:
-            return _component(False, f"weaviate http {status}")
-        grpc_probe = _socket_probe(grpc_host, grpc_port, timeout_seconds=2.5)
-        if not bool(grpc_probe.get("ok")):
-            return _component(True, f"ok (grpc probe failed: {_clean_text(grpc_probe.get('detail'))})")
-        return _component(True, "ok")
+        config = get_mongodb_config(require=True)
+        try:
+            import certifi  # type: ignore
+            from pymongo import MongoClient  # type: ignore
+        except Exception as exc:  # pragma: no cover - dependency branch
+            return _component(False, f"mongodb dependency unavailable: {exc}")
+
+        kwargs: Dict[str, Any] = {"serverSelectionTimeoutMS": 2500}
+        try:
+            kwargs["tlsCAFile"] = certifi.where()
+        except Exception:
+            pass
+        client = MongoClient(_clean_text(config.get("uri")), **kwargs)
+        try:
+            client.admin.command("ping")
+        finally:
+            client.close()
+        database = _clean_text(config.get("database"))
+        bucket = _clean_text(config.get("gridfs_bucket"))
+        return _component(True, f"ok database={database} bucket={bucket}")
     except Exception as exc:
         return _component(False, str(exc))
 
@@ -136,7 +141,8 @@ def _pinecone_probe() -> Dict[str, Any]:
         total = int(payload.get("total_vector_count", 0) or 0)
         namespace = _clean_text(payload.get("namespace"))
         index = _clean_text(payload.get("index"))
-        detail = f"ok index={index} namespace={namespace} total_vector_count={total}"
+        dimension = int(payload.get("dimension", 0) or 0)
+        detail = f"ok index={index} namespace={namespace} dimension={dimension} total_vector_count={total}"
         return _component(True, detail)
     except Exception as exc:
         return _component(False, str(exc))
@@ -176,12 +182,14 @@ def _extract_ollama_model_names(payload: Any) -> List[str]:
         return []
     models = payload.get("models")
     if not isinstance(models, list):
+        models = payload.get("data")
+    if not isinstance(models, list):
         return []
     names: List[str] = []
     for item in models:
         if not isinstance(item, Mapping):
             continue
-        name = _clean_text(item.get("name")) or _clean_text(item.get("model"))
+        name = _clean_text(item.get("name")) or _clean_text(item.get("model")) or _clean_text(item.get("id"))
         if name:
             names.append(name)
     deduped = sorted(set(names))
@@ -192,34 +200,50 @@ def _ollama_probe() -> Dict[str, Any]:
     try:
         config = get_ollama_config()
         if _ollama_is_disabled(config):
-            return _component(True, "disabled")
+            provider = _clean_text(config.get("provider")).lower() or "ollama"
+            if provider == "disabled":
+                return _component(True, "standby (LLM_PROVIDER=disabled)")
+            if not _bool_from_text(config.get("enabled"), default=True):
+                return _component(True, "standby (OLLAMA_ENABLED=false)")
+            return _component(True, "standby (OLLAMA_HOST=disabled)")
         host = _clean_text(config.get("host")) or "http://localhost:11434"
         model = _clean_text(config.get("model"))
         allow_unlisted_model = _bool_from_text(config.get("allow_unlisted_model"), default=False)
         auto_select_model = _bool_from_text(config.get("auto_select_model"), default=False)
         api_key = _clean_text(config.get("api_key"))
-        url = _build_ollama_url(host, "api/tags")
-        if not url:
+        urls = [_build_ollama_url(host, "api/tags"), _build_ollama_url(host, "v1/models")]
+        urls = [item for item in urls if item]
+        if not urls:
             return _component(False, "OLLAMA_HOST is required when LLM_PROVIDER=ollama")
-        req = Request(url=url, method="GET")
-        if api_key:
-            req.add_header("Authorization", f"Bearer {api_key}")
-        with urlopen(req, timeout=4) as response:  # noqa: S310 - local host URL from config
-            status = int(getattr(response, "status", 200))
-            body = response.read().decode("utf-8", errors="replace")
-        if status != 200:
-            return _component(False, f"ollama http {status}")
-        payload = json.loads(body or "{}")
+        payload: Any = {}
+        last_error = ""
+        for url in urls:
+            req = Request(url=url, method="GET")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            try:
+                with urlopen(req, timeout=4) as response:  # noqa: S310 - URL comes from runtime config
+                    status = int(getattr(response, "status", 200))
+                    body = response.read().decode("utf-8", errors="replace")
+                if status != 200:
+                    last_error = f"ollama http {status}"
+                    continue
+                payload = json.loads(body or "{}")
+                break
+            except Exception as exc:
+                last_error = str(exc)
+        if not payload:
+            return _component(False, last_error or "ollama model list unavailable")
         model_names = _extract_ollama_model_names(payload)
         if model:
             if model in model_names:
-                return _component(True, "ok")
+                return _component(True, f"ok model={model}")
             if allow_unlisted_model:
-                return _component(True, "ok")
+                return _component(True, f"ok model={model}")
             return _component(False, f"configured model not available: {model}")
 
         if auto_select_model and model_names:
-            return _component(True, f"ok (auto-selected model {model_names[0]})")
+            return _component(True, f"ok model={model_names[0]}")
 
         return _component(False, "configured model not available: <empty>")
     except Exception as exc:
@@ -295,20 +319,15 @@ def _artifact_probe() -> Dict[str, Any]:
 
 
 def build_health_payload() -> Dict[str, Any]:
-    vector_backend = get_vector_backend()
+    _ = get_vector_backend()
     components = {
         "api": _component(True, "ok"),
         "neo4j": _neo4j_probe(),
-        "weaviate": (
-            _component(True, "standby (VECTOR_BACKEND=pinecone)")
-            if vector_backend == "pinecone"
-            else _weaviate_probe()
-        ),
+        "mongodb": _mongodb_probe(),
         "ollama": _ollama_probe(),
         "artifact_status": _artifact_probe(),
+        "pinecone": _pinecone_probe(),
     }
-    if vector_backend == "pinecone":
-        components["pinecone"] = _pinecone_probe()
 
     try:
         _ = pbpk_master_simulator.run_simulation
@@ -347,12 +366,8 @@ def build_health_payload() -> Dict[str, Any]:
         components["user_risk_advisor"] = _component(False, str(exc))
 
     core_keys = ("api", "pbpk", "router", "orchestrator", "synthesizer", "grounding_guard", "user_risk_advisor")
-    external_keys = ["neo4j", "artifact_status"]
-    if vector_backend == "pinecone":
-        external_keys.append("pinecone")
-    else:
-        external_keys.append("weaviate")
-    if not _clean_text(components.get("ollama", {}).get("detail", "")).lower().startswith("disabled"):
+    external_keys = ["neo4j", "mongodb", "artifact_status", "pinecone"]
+    if not _clean_text(components.get("ollama", {}).get("detail", "")).lower().startswith("standby"):
         external_keys.append("ollama")
 
     if any(not bool(components[key]["ok"]) for key in core_keys):
@@ -360,7 +375,7 @@ def build_health_payload() -> Dict[str, Any]:
     elif any(not bool(components[key]["ok"]) for key in external_keys):
         status = "degraded"
     else:
-        status = "ok"
+        status = "healthy"
 
     return {"status": status, "components": components}
 

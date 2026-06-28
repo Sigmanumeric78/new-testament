@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from math import sqrt
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
-from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -26,13 +25,6 @@ except Exception:  # pragma: no cover - dependency branch
     GraphDatabase = None
 
 try:
-    import weaviate  # type: ignore
-    from weaviate.classes.query import MetadataQuery  # type: ignore
-except Exception:  # pragma: no cover - dependency branch
-    weaviate = None
-    MetadataQuery = None
-
-try:
     from reasoning.query_router import LOW_CONFIDENCE_THRESHOLD, route_query, validate_route_result_schema
     from simulation.pbpk.pbpk_master_simulator import (
         beverage_modifiers_path,
@@ -41,7 +33,7 @@ try:
         repo_root,
         run_simulation,
     )
-    from utils.config import get_data_root, get_neo4j_config, get_vector_backend, get_weaviate_config
+    from utils.config import get_data_root, get_neo4j_config, get_vector_backend
     from vectorstores.pinecone_store import PineconeVectorStore
 except ModuleNotFoundError:  # pragma: no cover - direct script execution path fix
     REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +47,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution path f
         repo_root,
         run_simulation,
     )
-    from utils.config import get_data_root, get_neo4j_config, get_vector_backend, get_weaviate_config
+    from utils.config import get_data_root, get_neo4j_config, get_vector_backend
     from vectorstores.pinecone_store import PineconeVectorStore
 
 LOGGER = logging.getLogger("hybrid_orchestrator")
@@ -63,7 +55,8 @@ LOGGER = logging.getLogger("hybrid_orchestrator")
 TOP_K = 8
 EPS = 1e-12
 
-MODULE_KEYS: Tuple[str, ...] = ("pbpk", "neo4j", "weaviate", "toxicity")
+SEMANTIC_RETRIEVAL_MODULE = "semantic_retrieval"
+MODULE_KEYS: Tuple[str, ...] = ("pbpk", "neo4j", SEMANTIC_RETRIEVAL_MODULE, "toxicity")
 
 SAFE_PBPK_DEFAULTS: Mapping[str, Any] = {
     "sex": "male",
@@ -134,7 +127,7 @@ BEVERAGE_ALIASES: Mapping[str, str] = {
     "cocktail": "cocktail",
 }
 
-ALL_WEAVIATE_COLLECTIONS: Tuple[str, ...] = (
+SEMANTIC_COLLECTIONS: Tuple[str, ...] = (
     "BeverageKnowledge",
     "CompoundKnowledge",
     "MetabolismKnowledge",
@@ -144,7 +137,7 @@ ALL_WEAVIATE_COLLECTIONS: Tuple[str, ...] = (
     "ScientificEvidence",
 )
 
-WEAVIATE_EMBEDDED_PARQUET: Mapping[str, str] = {
+SEMANTIC_EMBEDDED_PARQUET: Mapping[str, str] = {
     "BeverageKnowledge": "beverage_embeddings.parquet",
     "CompoundKnowledge": "compound_embeddings.parquet",
     "MetabolismKnowledge": "metabolism_embeddings.parquet",
@@ -595,10 +588,10 @@ def _query_vector_term_weight(term: str) -> float:
 def _collection_scope(intent: str) -> List[str]:
     if intent in INTENT_COLLECTION_SCOPE:
         return list(INTENT_COLLECTION_SCOPE[intent])
-    return list(ALL_WEAVIATE_COLLECTIONS)
+    return list(SEMANTIC_COLLECTIONS)
 
 
-def _rewrite_weaviate_query(intent: str, query: str) -> str:
+def _rewrite_semantic_query(intent: str, query: str) -> str:
     q = _clean_text(query)
     q_norm = _normalize_text(query)
 
@@ -1141,58 +1134,9 @@ class HybridOrchestrator:
             limitations,
         )
 
-    def _parse_weaviate_url(self, url: str) -> Dict[str, Any]:
-        parsed = urlparse(url)
-        if not parsed.scheme or not parsed.hostname:
-            raise ValueError(f"Invalid WEAVIATE_URL: '{url}'. Expected http(s)://host[:port]")
-        secure = parsed.scheme.lower() == "https"
-        return {
-            "host": parsed.hostname,
-            "port": int(parsed.port or (443 if secure else 80)),
-            "secure": secure,
-        }
-
-    def _connect_weaviate(self, config: Mapping[str, str]) -> Any:
-        if weaviate is None:
-            raise RuntimeError("weaviate-client is not installed.")
-
-        url_info = self._parse_weaviate_url(config["url"])
-        grpc_host = _clean_text(config.get("grpc_host", "")) or "localhost"
-        grpc_port = int(_clean_text(config.get("grpc_port", "")) or "50051")
-        api_key = _clean_text(config.get("api_key", ""))
-
-        auth_credentials = None
-        if api_key:
-            try:
-                from weaviate.classes.init import Auth  # type: ignore
-
-                auth_credentials = Auth.api_key(api_key)
-            except Exception:
-                from weaviate.auth import AuthApiKey  # type: ignore
-
-                auth_credentials = AuthApiKey(api_key)
-
-        try:
-            return weaviate.connect_to_custom(
-                http_host=url_info["host"],
-                http_port=url_info["port"],
-                http_secure=url_info["secure"],
-                grpc_host=grpc_host,
-                grpc_port=grpc_port,
-                grpc_secure=url_info["secure"],
-                auth_credentials=auth_credentials,
-            )
-        except Exception:
-            return weaviate.connect_to_local(
-                host=url_info["host"],
-                port=url_info["port"],
-                grpc_port=grpc_port,
-                auth_credentials=auth_credentials,
-            )
-
     def _embedded_corpus_path(self, collection: str) -> Path:
         data_root = get_data_root()
-        return data_root / "processed" / "weaviate" / "embedded" / WEAVIATE_EMBEDDED_PARQUET[collection]
+        return data_root / "processed" / "weaviate" / "embedded" / SEMANTIC_EMBEDDED_PARQUET[collection]
 
     def _load_embedded_collection_df(self, collection: str) -> pd.DataFrame:
         if collection in self._embedded_cache:
@@ -1449,204 +1393,6 @@ class HybridOrchestrator:
 
         return deduped
 
-    def _execute_weaviate(
-        self,
-        query: str,
-        route: Mapping[str, Any],
-    ) -> Tuple[Dict[str, Any], List[str]]:
-        intent = _clean_text(route.get("intent"))
-        collections = _collection_scope(intent)
-        search_query = _rewrite_weaviate_query(intent, query)
-        limitations: List[str] = []
-
-        try:
-            config = get_weaviate_config()
-        except Exception as exc:
-            limitations.append(f"Weaviate config unavailable: {exc}")
-            try:
-                hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
-            except Exception as embedded_exc:
-                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
-                hits = []
-            hits, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=hits, top_k=TOP_K)
-            if low_relevance:
-                limitations.append("Some supporting evidence was unavailable.")
-            return (
-                {
-                    "status": "success",
-                    "retrieval_backend": "embedded_fallback",
-                    "top_k": TOP_K,
-                    "collections_searched": collections,
-                    "hit_count": len(hits),
-                    "hits": hits,
-                },
-                limitations,
-            )
-
-        if weaviate is None:
-            limitations.append("Weaviate client unavailable; used embedded fallback retrieval.")
-            try:
-                hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
-            except Exception as embedded_exc:
-                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
-                hits = []
-            hits, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=hits, top_k=TOP_K)
-            if low_relevance:
-                limitations.append("Some supporting evidence was unavailable.")
-            return (
-                {
-                    "status": "success",
-                    "retrieval_backend": "embedded_fallback",
-                    "top_k": TOP_K,
-                    "collections_searched": collections,
-                    "hit_count": len(hits),
-                    "hits": hits,
-                },
-                limitations,
-            )
-
-        client = None
-        hits: List[Dict[str, Any]] = []
-        query_vector_details: Dict[str, Any] = {}
-        try:
-            client = self._connect_weaviate(config)
-            if not bool(client.is_ready()):
-                raise RuntimeError("Weaviate is reachable but is_ready() returned False.")
-
-            query_vector, query_vector_details = self._build_query_vector(search_query, collections)
-
-            metadata_query = None
-            if MetadataQuery is not None:
-                metadata_query = MetadataQuery(score=True, distance=True, certainty=True)
-
-            for collection_name in collections:
-                if not client.collections.exists(collection_name):
-                    limitations.append("Some supporting evidence was unavailable.")
-                    continue
-
-                collection = client.collections.get(collection_name)
-                response = collection.query.near_vector(
-                    near_vector=query_vector,
-                    limit=TOP_K,
-                    return_metadata=metadata_query,
-                    return_properties=[
-                        "object_id",
-                        "chunk_id",
-                        "collection",
-                        "title",
-                        "content",
-                        "source_dataset",
-                        "source_file",
-                        "metadata",
-                        "provenance",
-                    ],
-                )
-
-                for obj in list(getattr(response, "objects", []) or []):
-                    props = _coerce_json_dict(getattr(obj, "properties", {}))
-                    metadata = getattr(obj, "metadata", None)
-                    raw_score, distance, _, score = _score_from_metadata(metadata)
-
-                    metadata_payload = _parse_json_blob(props.get("metadata"))
-                    provenance_payload = _parse_json_blob(props.get("provenance"))
-                    source_dataset, source_file = _extract_source_fields(
-                        props,
-                        metadata_payload,
-                        provenance_payload,
-                    )
-
-                    hits.append(
-                        {
-                            "object_id": _clean_text(props.get("object_id")),
-                            "collection": _clean_text(props.get("collection")) or collection_name,
-                            "title": _clean_text(props.get("title")),
-                            "content_excerpt": _clean_text(props.get("content"))[:320],
-                            "score": _safe_round(raw_score if raw_score is not None else score),
-                            "distance": _safe_round(distance),
-                            "source_dataset": source_dataset,
-                            "source_file": source_file,
-                        }
-                    )
-
-            ordered = sorted(
-                hits,
-                key=lambda item: (
-                    -(item["score"] if item["score"] is not None else 0.0),
-                    item["collection"],
-                    item["object_id"],
-                ),
-            )
-            deduped: List[Dict[str, Any]] = []
-            seen: Set[Tuple[str, str]] = set()
-            for item in ordered:
-                key = (item["collection"], item["object_id"])
-                if key in seen:
-                    continue
-                seen.add(key)
-                deduped.append(item)
-                if len(deduped) >= TOP_K:
-                    break
-
-            if not deduped:
-                limitations.append("Weaviate returned zero hits; used embedded fallback retrieval.")
-                try:
-                    deduped = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
-                except Exception as embedded_exc:
-                    limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
-                    deduped = []
-                backend = "embedded_fallback"
-            else:
-                backend = "weaviate_near_vector"
-
-            deduped, low_relevance = _filter_relevant_hits(intent=intent, query=query, hits=deduped, top_k=TOP_K)
-            if low_relevance:
-                limitations.append("Some supporting evidence was unavailable.")
-
-            return (
-                {
-                    "status": "success",
-                    "retrieval_backend": backend,
-                    "top_k": TOP_K,
-                    "collections_searched": collections,
-                    "hit_count": len(deduped),
-                    "hits": deduped,
-                    **query_vector_details,
-                },
-                limitations,
-            )
-        except Exception as exc:
-            limitations.append(f"Weaviate query failed; used embedded fallback retrieval: {exc}")
-            try:
-                fallback_hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
-            except Exception as embedded_exc:
-                limitations.append(f"Embedded fallback retrieval unavailable: {embedded_exc}")
-                fallback_hits = []
-            fallback_hits, low_relevance = _filter_relevant_hits(
-                intent=intent,
-                query=query,
-                hits=fallback_hits,
-                top_k=TOP_K,
-            )
-            if low_relevance:
-                limitations.append("Some supporting evidence was unavailable.")
-            return (
-                {
-                    "status": "success",
-                    "retrieval_backend": "embedded_fallback",
-                    "top_k": TOP_K,
-                    "collections_searched": collections,
-                    "hit_count": len(fallback_hits),
-                    "hits": fallback_hits,
-                },
-                limitations,
-            )
-        finally:
-            if client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-
     def _execute_pinecone(
         self,
         query: str,
@@ -1654,7 +1400,7 @@ class HybridOrchestrator:
     ) -> Tuple[Dict[str, Any], List[str]]:
         intent = _clean_text(route.get("intent"))
         collections = _collection_scope(intent)
-        search_query = _rewrite_weaviate_query(intent, query)
+        search_query = _rewrite_semantic_query(intent, query)
         limitations: List[str] = []
         query_vector_details: Dict[str, Any] = {}
 
@@ -1695,8 +1441,8 @@ class HybridOrchestrator:
                 },
                 limitations,
             )
-        except Exception as exc:
-            limitations.append(f"Pinecone query failed; used embedded fallback retrieval: {exc}")
+        except Exception:
+            limitations.append("Pinecone query failed; used embedded fallback retrieval.")
             try:
                 fallback_hits = self._embedded_fallback_search(search_query, collections, top_k=TOP_K)
             except Exception as embedded_exc:
@@ -1723,23 +1469,21 @@ class HybridOrchestrator:
                 limitations,
             )
 
-    def _execute_vector_retrieval(
+    def _execute_semantic_retrieval(
         self,
         query: str,
         route: Mapping[str, Any],
     ) -> Tuple[Dict[str, Any], List[str]]:
-        backend = get_vector_backend()
-        if backend == "pinecone":
-            return self._execute_pinecone(query=query, route=route)
-        return self._execute_weaviate(query=query, route=route)
+        _ = get_vector_backend()
+        return self._execute_pinecone(query=query, route=route)
 
     def _execute_toxicity(
         self,
         query: str,
         neo4j_result: Optional[Mapping[str, Any]],
-        weaviate_result: Optional[Mapping[str, Any]],
+        semantic_retrieval_result: Optional[Mapping[str, Any]],
     ) -> Tuple[Dict[str, Any], List[str]]:
-        if neo4j_result is None and weaviate_result is None:
+        if neo4j_result is None and semantic_retrieval_result is None:
             return (
                 {
                     "status": "unavailable",
@@ -1748,7 +1492,7 @@ class HybridOrchestrator:
                     "symptom_modifiers": [],
                     "confidence": 0.0,
                 },
-                ["Toxicity module unavailable: missing Neo4j and Weaviate evidence inputs."],
+                ["Toxicity module unavailable: missing Neo4j and semantic retrieval evidence inputs."],
             )
 
         risk_compounds: Set[str] = set()
@@ -1768,8 +1512,8 @@ class HybridOrchestrator:
                 if risk_type:
                     risk_types.add(risk_type)
 
-        if weaviate_result and isinstance(weaviate_result.get("hits"), list):
-            for hit in weaviate_result["hits"]:
+        if semantic_retrieval_result and isinstance(semantic_retrieval_result.get("hits"), list):
+            for hit in semantic_retrieval_result["hits"]:
                 title = _normalize_text(hit.get("title"))
                 excerpt = _normalize_text(hit.get("content_excerpt"))
                 collection = _clean_text(hit.get("collection"))
@@ -1784,10 +1528,12 @@ class HybridOrchestrator:
                         symptom_modifiers.add(term)
 
         has_neo4j = bool(neo4j_result and neo4j_result.get("status") == "success")
-        has_weaviate = bool(weaviate_result and weaviate_result.get("status") == "success")
+        has_semantic_retrieval = bool(
+            semantic_retrieval_result and semantic_retrieval_result.get("status") == "success"
+        )
         confidence = (
             0.35 * (1.0 if has_neo4j else 0.0)
-            + 0.30 * (1.0 if has_weaviate else 0.0)
+            + 0.30 * (1.0 if has_semantic_retrieval else 0.0)
             + 0.20 * min(len(risk_compounds) / 5.0, 1.0)
             + 0.15 * min(len(risk_types) / 3.0, 1.0)
         )
@@ -1818,9 +1564,9 @@ class HybridOrchestrator:
             if result and _clean_text(result.get("status")) == "success":
                 success_count += 1
 
-        weaviate_hits = 0
-        if module_results.get("weaviate"):
-            weaviate_hits = int(module_results["weaviate"].get("hit_count") or 0)
+        semantic_retrieval_hits = 0
+        if module_results.get(SEMANTIC_RETRIEVAL_MODULE):
+            semantic_retrieval_hits = int(module_results[SEMANTIC_RETRIEVAL_MODULE].get("hit_count") or 0)
 
         neo4j_paths = 0
         if module_results.get("neo4j"):
@@ -1835,7 +1581,7 @@ class HybridOrchestrator:
         score = (
             0.45 * float(route_conf)
             + 0.20 * (float(success_count) / float(required_count))
-            + 0.15 * min(float(weaviate_hits) / float(TOP_K), 1.0)
+            + 0.15 * min(float(semantic_retrieval_hits) / float(TOP_K), 1.0)
             + 0.10 * min(float(neo4j_paths) / 12.0, 1.0)
             + 0.10 * pbpk_component
         )
@@ -1876,9 +1622,9 @@ class HybridOrchestrator:
                 if paths:
                     key_facts.append(f"Neo4j returned {len(paths)} causal paths.")
 
-        weaviate_result = module_results.get("weaviate")
-        if weaviate_result and weaviate_result.get("status") == "success":
-            hits = weaviate_result.get("hits", [])
+        semantic_retrieval_result = module_results.get(SEMANTIC_RETRIEVAL_MODULE)
+        if semantic_retrieval_result and semantic_retrieval_result.get("status") == "success":
+            hits = semantic_retrieval_result.get("hits", [])
             if isinstance(hits, list):
                 for item in hits:
                     retrieved_evidence.append(
@@ -1892,7 +1638,7 @@ class HybridOrchestrator:
                             "score": item.get("score"),
                             "distance": item.get("distance"),
                             "retrieval_backend": _clean_text(item.get("retrieval_backend"))
-                            or _clean_text(weaviate_result.get("retrieval_backend")),
+                            or _clean_text(semantic_retrieval_result.get("retrieval_backend")),
                             "source_dataset": _clean_text(item.get("source_dataset")),
                             "source_file": _clean_text(item.get("source_file")),
                         }
@@ -1983,19 +1729,19 @@ class HybridOrchestrator:
                 module_results["neo4j"] = neo4j_result
                 limitations.extend(neo4j_limits)
 
-            elif module == "weaviate":
-                weaviate_result, weaviate_limits = self._execute_vector_retrieval(
+            elif module == SEMANTIC_RETRIEVAL_MODULE:
+                semantic_retrieval_result, semantic_retrieval_limits = self._execute_semantic_retrieval(
                     query=text,
                     route=route_payload,
                 )
-                module_results["weaviate"] = weaviate_result
-                limitations.extend(weaviate_limits)
+                module_results[SEMANTIC_RETRIEVAL_MODULE] = semantic_retrieval_result
+                limitations.extend(semantic_retrieval_limits)
 
             elif module == "toxicity":
                 toxicity_result, toxicity_limits = self._execute_toxicity(
                     query=text,
                     neo4j_result=module_results.get("neo4j"),
-                    weaviate_result=module_results.get("weaviate"),
+                    semantic_retrieval_result=module_results.get(SEMANTIC_RETRIEVAL_MODULE),
                 )
                 module_results["toxicity"] = toxicity_result
                 limitations.extend(toxicity_limits)
@@ -2023,7 +1769,7 @@ class HybridOrchestrator:
             "module_results": {
                 "pbpk": module_results.get("pbpk"),
                 "neo4j": module_results.get("neo4j"),
-                "weaviate": module_results.get("weaviate"),
+                SEMANTIC_RETRIEVAL_MODULE: module_results.get(SEMANTIC_RETRIEVAL_MODULE),
                 "toxicity": module_results.get("toxicity"),
             },
             "evidence_bundle": evidence_bundle,

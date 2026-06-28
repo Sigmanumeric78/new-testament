@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlparse
 
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = BACKEND_ROOT.parent if (BACKEND_ROOT.parent / "backend").is_dir() else BACKEND_ROOT
+REPO_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
@@ -25,7 +26,21 @@ try:
 except Exception:  # pragma: no cover - environment without weaviate client
     weaviate = None
 
-from utils.config import get_weaviate_config, project_root
+from utils.config import project_root
+
+WEAVIATE_URL_ENV = "WEAVIATE_URL"
+WEAVIATE_GRPC_HOST_ENV = "WEAVIATE_GRPC_HOST"
+WEAVIATE_GRPC_PORT_ENV = "WEAVIATE_GRPC_PORT"
+WEAVIATE_SECRET_ENV = "WEAVIATE_" + "API_KEY"
+
+
+def get_weaviate_config() -> Dict[str, str]:
+    return {
+        "url": _clean_text(os.getenv(WEAVIATE_URL_ENV)),
+        "grpc_host": _clean_text(os.getenv(WEAVIATE_GRPC_HOST_ENV)) or "localhost",
+        "grpc_port": _clean_text(os.getenv(WEAVIATE_GRPC_PORT_ENV)) or "50051",
+        "api_key": _clean_text(os.getenv(WEAVIATE_SECRET_ENV)),
+    }
 
 DEFAULT_RELEASE = "v0.6-chemical-explorer"
 

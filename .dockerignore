@@ -30,6 +30,10 @@ weaviate_data
 databases
 transactions
 
+# Legacy and migration-only tooling
+tools/legacy_migrations
+tools/migrations
+
 # Frontend generated artifacts
 frontend/node_modules
 frontend/dist

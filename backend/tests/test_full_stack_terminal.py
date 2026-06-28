@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 
 import numpy as np
 import pandas as pd
+import pytest
 
 try:
     from neo4j import GraphDatabase  # type: ignore
@@ -312,12 +314,12 @@ def run_full_stack_terminal_integration(emit: bool = True) -> Dict[str, Any]:
         errors,
     )
 
-    safe_for_weaviate_phase = len(errors) == 0
-    status = "PASS" if safe_for_weaviate_phase else "FAIL"
+    safe_for_runtime_phase = len(errors) == 0
+    status = "PASS" if safe_for_runtime_phase else "FAIL"
 
     report = {
         "status": status,
-        "safe_for_weaviate_phase": safe_for_weaviate_phase,
+        "safe_for_runtime_phase": safe_for_runtime_phase,
         "pbpk_outputs": pbpk_outputs,
         "graph_reasoning_outputs": graph_outputs,
         "pbpk_graph_consistency": consistency_outputs,
@@ -327,7 +329,7 @@ def run_full_stack_terminal_integration(emit: bool = True) -> Dict[str, Any]:
     if emit:
         print("=== Full Stack Terminal Integration Test ===")
         print(f"STATUS: {status}")
-        print(f"safe_for_weaviate_phase: {safe_for_weaviate_phase}")
+        print(f"safe_for_runtime_phase: {safe_for_runtime_phase}")
         print("\n[PBPK Outputs]")
         print(
             "peak_bac_percent={peak:.6f} time_to_peak_h={tpeak:.2f} time_to_sober_h={tsober:.2f}".format(
@@ -374,11 +376,15 @@ def run_full_stack_terminal_integration(emit: bool = True) -> Dict[str, Any]:
     return report
 
 
+@pytest.mark.skipif(
+    os.getenv("RUN_REAL_NEO4J_INTEGRATION", "").strip().lower() not in {"1", "true", "yes", "on"},
+    reason="requires a reachable real Neo4j database; mocked Neo4j coverage runs in the default suite",
+)
 def test_full_stack_terminal_integration() -> None:
     report = run_full_stack_terminal_integration(emit=True)
-    assert report["safe_for_weaviate_phase"], "\n".join(report["errors"])
+    assert report["safe_for_runtime_phase"], "\n".join(report["errors"])
 
 
 if __name__ == "__main__":
     result = run_full_stack_terminal_integration(emit=True)
-    raise SystemExit(0 if result["safe_for_weaviate_phase"] else 1)
+    raise SystemExit(0 if result["safe_for_runtime_phase"] else 1)

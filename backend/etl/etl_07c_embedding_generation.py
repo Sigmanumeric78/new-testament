@@ -1,4 +1,4 @@
-"""ETL step 07c: deterministic embedding generation for Weaviate retrieval objects."""
+"""ETL step 07c: deterministic embedding generation for semantic retrieval objects."""
 
 from __future__ import annotations
 
@@ -333,7 +333,7 @@ def build_failed_report(
         "dimension_mismatch_rows": 0,
         "runtime_seconds": runtime_seconds,
         "error": error,
-        "safe_for_weaviate_schema_init": False,
+        "safe_for_semantic_schema_init": False,
     }
 
 
@@ -517,7 +517,7 @@ def main() -> None:
     }
     total_embeddings_generated = int(sum(embeddings_per_collection.values()))
 
-    safe_for_weaviate_schema_init = (
+    safe_for_semantic_schema_init = (
         model_load_success
         and total_embeddings_generated > 0
         and failed_embeddings == 0
@@ -549,12 +549,12 @@ def main() -> None:
             for collection, _, output_file in COLLECTION_FILE_MAP
         },
         "active_collections_this_run": [item[0] for item in active_specs],
-        "safe_for_weaviate_schema_init": safe_for_weaviate_schema_init,
+        "safe_for_semantic_schema_init": safe_for_semantic_schema_init,
     }
 
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding=ENCODING)
     LOGGER.info("Wrote embedding generation report -> %s", report_path)
-    LOGGER.info("safe_for_weaviate_schema_init=%s", safe_for_weaviate_schema_init)
+    LOGGER.info("safe_for_semantic_schema_init=%s", safe_for_semantic_schema_init)
 
 
 if __name__ == "__main__":

@@ -10,12 +10,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urlparse
-
-try:
-    import weaviate  # type: ignore
-except Exception:  # pragma: no cover
-    weaviate = None
 
 try:
     from neo4j import GraphDatabase  # type: ignore
@@ -28,7 +22,7 @@ from reasoning.query_router import route_query
 from reasoning.response_synthesizer import OLLAMA_MODEL, ResponseSynthesizer
 from reasoning.user_risk_advisor import build_user_risk_advice
 from simulation.pbpk import pbpk_master_simulator
-from utils.config import get_neo4j_config, get_weaviate_config, project_root
+from utils.config import get_neo4j_config, project_root
 
 LOG_PATH = project_root() / "data" / "interim" / "reasoning" / "app_cli_run_log.jsonl"
 
@@ -114,92 +108,11 @@ def _is_neo4j_reachable() -> Tuple[bool, str]:
     return True, "ok"
 
 
-def _parse_weaviate_url(url: str) -> Dict[str, Any]:
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.hostname:
-        raise ValueError(f"Invalid WEAVIATE_URL: '{url}'. Expected http(s)://host[:port]")
-    secure = parsed.scheme.lower() == "https"
-    return {
-        "host": parsed.hostname,
-        "port": int(parsed.port or (443 if secure else 80)),
-        "secure": secure,
-    }
-
-
-def _connect_weaviate(config: Mapping[str, str]) -> Any:
-    if weaviate is None:
-        raise RuntimeError("weaviate-client is not installed")
-
-    url_info = _parse_weaviate_url(config["url"])
-    grpc_host = _clean_text(config.get("grpc_host", "")) or "localhost"
-    grpc_port = int(_clean_text(config.get("grpc_port", "")) or "50051")
-    api_key = _clean_text(config.get("api_key", ""))
-
-    auth_credentials = None
-    if api_key:
-        try:
-            from weaviate.classes.init import Auth  # type: ignore
-
-            auth_credentials = Auth.api_key(api_key)
-        except Exception:
-            from weaviate.auth import AuthApiKey  # type: ignore
-
-            auth_credentials = AuthApiKey(api_key)
-
-    try:
-        return weaviate.connect_to_custom(
-            http_host=url_info["host"],
-            http_port=url_info["port"],
-            http_secure=url_info["secure"],
-            grpc_host=grpc_host,
-            grpc_port=grpc_port,
-            grpc_secure=url_info["secure"],
-            auth_credentials=auth_credentials,
-        )
-    except Exception:
-        return weaviate.connect_to_local(
-            host=url_info["host"],
-            port=url_info["port"],
-            grpc_port=grpc_port,
-            auth_credentials=auth_credentials,
-        )
-
-
-def _is_weaviate_reachable() -> Tuple[bool, str]:
-    if weaviate is None:
-        return False, "weaviate-client not installed"
-
-    try:
-        config = get_weaviate_config()
-    except Exception as exc:
-        return False, str(exc)
-
-    client = None
-    try:
-        client = _connect_weaviate(config)
-        ready = bool(client.is_ready())
-        if not ready:
-            return False, "is_ready() returned False"
-    except Exception as exc:
-        return False, str(exc)
-    finally:
-        if client is not None:
-            try:
-                client.close()
-            except Exception:
-                pass
-
-    return True, "ok"
-
-
 def run_health_check() -> Dict[str, Any]:
     components: Dict[str, Dict[str, Any]] = {}
 
     neo4j_ok, neo4j_detail = _is_neo4j_reachable()
     components["neo4j_reachable"] = {"ok": neo4j_ok, "detail": neo4j_detail}
-
-    weaviate_ok, weaviate_detail = _is_weaviate_reachable()
-    components["weaviate_reachable"] = {"ok": weaviate_ok, "detail": weaviate_detail}
 
     ollama_ok, ollama_detail = _is_ollama_reachable()
     components["ollama_reachable"] = {"ok": ollama_ok, "detail": ollama_detail}

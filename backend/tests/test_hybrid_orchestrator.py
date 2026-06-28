@@ -72,7 +72,7 @@ def _fake_neo4j_success() -> Dict[str, Any]:
     }
 
 
-def _fake_weaviate_success() -> Dict[str, Any]:
+def _fake_semantic_retrieval_success() -> Dict[str, Any]:
     return {
         "status": "success",
         "retrieval_backend": "embedded_fallback",
@@ -104,26 +104,26 @@ def _fake_weaviate_success() -> Dict[str, Any]:
     }
 
 
-def test_mechanistic_explanation_calls_neo4j_and_weaviate(monkeypatch: Any) -> None:
+def test_mechanistic_explanation_calls_neo4j_and_semantic_retrieval(monkeypatch: Any) -> None:
     calls: List[str] = []
 
     def fake_neo4j(self: HybridOrchestrator, query: str, route: Dict[str, Any], parsed_inputs: Any) -> Any:
         calls.append("neo4j")
         return _fake_neo4j_success(), []
 
-    def fake_weaviate(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
-        calls.append("weaviate")
-        return _fake_weaviate_success(), []
+    def fake_semantic_retrieval(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        calls.append("semantic_retrieval")
+        return _fake_semantic_retrieval_success(), []
 
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", fake_neo4j)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", fake_weaviate)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", fake_semantic_retrieval)
 
     orchestrator = HybridOrchestrator(enable_llm_fallback=False)
     result = orchestrator.orchestrate("Why does whisky hit harder?")
 
-    assert calls == ["neo4j", "weaviate"]
+    assert calls == ["neo4j", "semantic_retrieval"]
     assert result["module_results"]["neo4j"]["status"] == "success"
-    assert result["module_results"]["weaviate"]["status"] == "success"
+    assert result["module_results"]["semantic_retrieval"]["status"] == "success"
 
 
 def test_simulation_query_runs_pbpk_with_defaults_when_allowed() -> None:
@@ -138,7 +138,7 @@ def test_simulation_query_runs_pbpk_with_defaults_when_allowed() -> None:
     assert pbpk["simulations"][0]["volume_ml"] == 180.0
 
 
-def test_toxicity_query_calls_neo4j_weaviate_toxicity(monkeypatch: Any) -> None:
+def test_toxicity_query_calls_neo4j_semantic_retrieval_toxicity(monkeypatch: Any) -> None:
     calls: List[str] = []
     original_toxicity = HybridOrchestrator._execute_toxicity
 
@@ -146,29 +146,34 @@ def test_toxicity_query_calls_neo4j_weaviate_toxicity(monkeypatch: Any) -> None:
         calls.append("neo4j")
         return _fake_neo4j_success(), []
 
-    def fake_weaviate(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
-        calls.append("weaviate")
-        return _fake_weaviate_success(), []
+    def fake_semantic_retrieval(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        calls.append("semantic_retrieval")
+        return _fake_semantic_retrieval_success(), []
 
-    def spy_toxicity(self: HybridOrchestrator, query: str, neo4j_result: Any, weaviate_result: Any) -> Any:
+    def spy_toxicity(
+        self: HybridOrchestrator,
+        query: str,
+        neo4j_result: Any,
+        semantic_retrieval_result: Any,
+    ) -> Any:
         calls.append("toxicity")
-        return original_toxicity(self, query, neo4j_result, weaviate_result)
+        return original_toxicity(self, query, neo4j_result, semantic_retrieval_result)
 
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", fake_neo4j)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", fake_weaviate)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", fake_semantic_retrieval)
     monkeypatch.setattr(HybridOrchestrator, "_execute_toxicity", spy_toxicity)
 
     orchestrator = HybridOrchestrator(enable_llm_fallback=False)
     result = orchestrator.orchestrate("Why does wine give me headaches?")
 
-    assert calls == ["neo4j", "weaviate", "toxicity"]
+    assert calls == ["neo4j", "semantic_retrieval", "toxicity"]
     toxicity = result["module_results"]["toxicity"]
     assert toxicity is not None
     assert toxicity["status"] == "success"
     assert "sulfites" in toxicity["risk_compounds"]
 
 
-def test_comparison_query_calls_pbpk_neo4j_weaviate(monkeypatch: Any) -> None:
+def test_comparison_query_calls_pbpk_neo4j_semantic_retrieval(monkeypatch: Any) -> None:
     calls: List[str] = []
 
     def fake_pbpk(self: HybridOrchestrator, query: str, route: Dict[str, Any], parsed_inputs: Any) -> Any:
@@ -179,40 +184,40 @@ def test_comparison_query_calls_pbpk_neo4j_weaviate(monkeypatch: Any) -> None:
         calls.append("neo4j")
         return _fake_neo4j_success(), []
 
-    def fake_weaviate(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
-        calls.append("weaviate")
-        return _fake_weaviate_success(), []
+    def fake_semantic_retrieval(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        calls.append("semantic_retrieval")
+        return _fake_semantic_retrieval_success(), []
 
     monkeypatch.setattr(HybridOrchestrator, "_execute_pbpk", fake_pbpk)
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", fake_neo4j)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", fake_weaviate)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", fake_semantic_retrieval)
 
     orchestrator = HybridOrchestrator(enable_llm_fallback=False)
     result = orchestrator.orchestrate("Beer vs whisky, which hits harder?")
 
-    assert calls == ["pbpk", "neo4j", "weaviate"]
+    assert calls == ["pbpk", "neo4j", "semantic_retrieval"]
     assert result["module_results"]["pbpk"]["status"] == "success"
     assert result["module_results"]["neo4j"]["status"] == "success"
-    assert result["module_results"]["weaviate"]["status"] == "success"
+    assert result["module_results"]["semantic_retrieval"]["status"] == "success"
 
 
-def test_scientific_evidence_query_calls_weaviate_only(monkeypatch: Any) -> None:
+def test_scientific_evidence_query_calls_semantic_retrieval_only(monkeypatch: Any) -> None:
     calls: List[str] = []
 
-    def fake_weaviate(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
-        calls.append("weaviate")
-        return _fake_weaviate_success(), []
+    def fake_semantic_retrieval(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        calls.append("semantic_retrieval")
+        return _fake_semantic_retrieval_success(), []
 
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", fake_weaviate)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", fake_semantic_retrieval)
 
     orchestrator = HybridOrchestrator(enable_llm_fallback=False)
     result = orchestrator.orchestrate("Show research on sulfites")
 
-    assert calls == ["weaviate"]
+    assert calls == ["semantic_retrieval"]
     assert result["module_results"]["pbpk"] is None
     assert result["module_results"]["neo4j"] is None
     assert result["module_results"]["toxicity"] is None
-    assert result["module_results"]["weaviate"]["status"] == "success"
+    assert result["module_results"]["semantic_retrieval"]["status"] == "success"
 
 
 def test_personalized_missing_input_avoids_unsafe_pbpk_simulation() -> None:
@@ -230,11 +235,11 @@ def test_hybrid_orchestrator_output_is_json_serializable(monkeypatch: Any) -> No
     def fake_neo4j(self: HybridOrchestrator, query: str, route: Dict[str, Any], parsed_inputs: Any) -> Any:
         return _fake_neo4j_success(), []
 
-    def fake_weaviate(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
-        return _fake_weaviate_success(), []
+    def fake_semantic_retrieval(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        return _fake_semantic_retrieval_success(), []
 
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", fake_neo4j)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", fake_weaviate)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", fake_semantic_retrieval)
 
     orchestrator = HybridOrchestrator(enable_llm_fallback=False)
     result = orchestrator.orchestrate("Why does whisky hit harder?")
@@ -250,11 +255,11 @@ def test_hybrid_orchestrator_deterministic_rerun_behavior(monkeypatch: Any) -> N
     def fake_neo4j(self: HybridOrchestrator, query: str, route: Dict[str, Any], parsed_inputs: Any) -> Any:
         return _fake_neo4j_success(), []
 
-    def fake_weaviate(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
-        return _fake_weaviate_success(), []
+    def fake_semantic_retrieval(self: HybridOrchestrator, query: str, route: Dict[str, Any]) -> Any:
+        return _fake_semantic_retrieval_success(), []
 
     monkeypatch.setattr(HybridOrchestrator, "_execute_neo4j", fake_neo4j)
-    monkeypatch.setattr(HybridOrchestrator, "_execute_weaviate", fake_weaviate)
+    monkeypatch.setattr(HybridOrchestrator, "_execute_semantic_retrieval", fake_semantic_retrieval)
 
     orchestrator = HybridOrchestrator(enable_llm_fallback=False)
     query = "Why does whisky hit harder?"

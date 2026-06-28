@@ -17,7 +17,7 @@ def _safe_payload(query: str = "Why does whisky hit harder?") -> Dict[str, Any]:
     return {
         "query": query,
         "intent": "mechanistic_explanation",
-        "modules_used": ["neo4j", "weaviate"],
+        "modules_used": ["neo4j", "semantic_retrieval"],
         "approved_for_display": True,
         "guard_approved_for_display": True,
         "unsafe_claims_detected": False,
@@ -98,7 +98,6 @@ def test_pretty_mode_user_fields_only(monkeypatch: Any, capsys: Any) -> None:
 
 def test_health_check_returns_all_required_components(monkeypatch: Any) -> None:
     monkeypatch.setattr(app_cli, "_is_neo4j_reachable", lambda: (True, "ok"))
-    monkeypatch.setattr(app_cli, "_is_weaviate_reachable", lambda: (True, "ok"))
     monkeypatch.setattr(app_cli, "_is_ollama_reachable", lambda timeout_seconds=6: (True, "ok"))
 
     health = app_cli.run_health_check()
@@ -107,7 +106,6 @@ def test_health_check_returns_all_required_components(monkeypatch: Any) -> None:
     components = health["components"]
     required = {
         "neo4j_reachable",
-        "weaviate_reachable",
         "ollama_reachable",
         "pbpk_importable",
         "router_available",

@@ -29,13 +29,11 @@ def test_acceptance_script_has_hardened_timeout_defaults() -> None:
 
 def test_acceptance_script_has_timeout_diagnostics_and_prewarm_option() -> None:
     text = _read_script()
-    assert (
-        "Request timed out. This usually means Ollama/Qwen is cold-starting or the backend is still generating."
-        in text
-    )
-    assert "Try: ollama run qwen2.5:3b 'ready'" in text
+    assert "Request timed out. This usually means the backend is still restoring artifacts or generating." in text
+    assert "verify OLLAMA_MODEL is available" in text
     assert "Or rerun with: CURL_TIMEOUT=120 ./scripts/fullstack_acceptance_check.sh" in text
     assert 'PREWARM_OLLAMA="${PREWARM_OLLAMA:-false}"' in text
+    assert 'OLLAMA_MODEL="${OLLAMA_MODEL:-}"' in text
     assert "/api/generate" in text
 
 

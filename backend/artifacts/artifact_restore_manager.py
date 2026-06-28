@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping
 
 from artifacts.artifact_manager import check_all_artifacts, filter_runtime_specs, load_manifest, summarize_artifacts
-from utils.config import get_project_root, resolve_project_path
+from utils.config import get_artifact_backend, get_project_root, resolve_project_path
 
 DEFAULT_ARTIFACT_RELEASE = "v0.6-chemical-explorer"
-DEFAULT_ARTIFACT_BACKEND = "supabase"
+DEFAULT_ARTIFACT_BACKEND = "mongodb"
 DEFAULT_MANIFEST_PATH = "data/artifact_manifest.example.json"
 RESTORE_LOG_PREFIX = "[artifact-restore]"
 SENSITIVE_ENV_MARKERS = ("URI", "KEY", "TOKEN", "PASSWORD", "SECRET")
@@ -115,7 +115,7 @@ def schedule_background_restore() -> Dict[str, Any]:
 
 
 def _artifact_backend() -> str:
-    return _clean_text(os.getenv("ARTIFACT_STORE_BACKEND", DEFAULT_ARTIFACT_BACKEND)).lower() or DEFAULT_ARTIFACT_BACKEND
+    return get_artifact_backend()
 
 
 def _artifact_release() -> str:
@@ -130,10 +130,6 @@ def _restore_workspace_dir(release: str) -> Path:
 
 
 def _mongodb_output_root() -> Path:
-    raw = _clean_text(os.getenv("MONGODB_RESTORE_OUTPUT_ROOT"))
-    if raw:
-        return Path(raw).expanduser()
-
     data_root_raw = _clean_text(os.getenv("DATA_ROOT"))
     data_root = Path(data_root_raw).expanduser() if data_root_raw else resolve_project_path("data")
     if data_root.name == "data":
@@ -213,9 +209,7 @@ def _run_restore() -> None:
 def _restore_artifacts(*, backend: str, release: str) -> Dict[str, Any]:
     if backend == "mongodb":
         return _restore_mongodb(release)
-    if backend == "supabase":
-        return _restore_supabase(release)
-    raise ValueError(f"unsupported ARTIFACT_STORE_BACKEND={backend}")
+    raise ValueError(f"Unsupported artifact backend: {backend}. Supported backend: mongodb")
 
 
 def _restore_mongodb(release: str) -> Dict[str, Any]:
@@ -240,38 +234,6 @@ def _restore_mongodb(release: str) -> Dict[str, Any]:
     finally:
         if store is not None:
             store.close()
-
-
-def _restore_supabase(release: str) -> Dict[str, Any]:
-    from scripts import artifact_download_supabase
-    from scripts.artifact_verify_release import verify_release_manifest
-
-    workspace_dir = _restore_workspace_dir(release)
-    report = artifact_download_supabase.restore_release(
-        release,
-        execute=True,
-        overwrite=True,
-        runtime_only=True,
-        workspace_dir=workspace_dir,
-    )
-    if bool(report.get("error")):
-        message = _clean_text(report.get("message")) or "Supabase artifact restore failed"
-        raise RuntimeError(message)
-
-    manifest_path = workspace_dir / "artifact_manifest.json"
-    verification = verify_release_manifest(
-        release,
-        manifest_path,
-        runtime_only=True,
-        workspace_dir=workspace_dir,
-    )
-    if not bool(verification.get("all_required_valid")):
-        invalid_count = int(verification.get("invalid_count", 0) or 0)
-        raise RuntimeError(f"{invalid_count} required Supabase artifacts failed verification")
-
-    payload = dict(report)
-    payload["verification"] = verification
-    return payload
 
 
 def _restored_count(report: Mapping[str, Any]) -> int:

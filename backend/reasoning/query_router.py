@@ -20,7 +20,8 @@ LOGGER = logging.getLogger("query_router")
 
 ENCODING = "utf-8"
 LOW_CONFIDENCE_THRESHOLD = 0.75
-OLLAMA_MODEL = "qwen2.5:3b"
+OLLAMA_MODEL = ""
+SEMANTIC_RETRIEVAL_MODULE = "semantic_retrieval"
 
 INTENT_CLASSES: Tuple[str, ...] = (
     "simulation",
@@ -44,12 +45,12 @@ INPUT_FIELDS: Tuple[str, ...] = (
 
 INTENT_MODULES: Mapping[str, List[str]] = {
     "simulation": ["pbpk"],
-    "mechanistic_explanation": ["neo4j", "weaviate"],
-    "toxicity_risk": ["neo4j", "weaviate", "toxicity"],
-    "comparison": ["pbpk", "neo4j", "weaviate"],
-    "scientific_evidence": ["weaviate"],
+    "mechanistic_explanation": ["neo4j", SEMANTIC_RETRIEVAL_MODULE],
+    "toxicity_risk": ["neo4j", SEMANTIC_RETRIEVAL_MODULE, "toxicity"],
+    "comparison": ["pbpk", "neo4j", SEMANTIC_RETRIEVAL_MODULE],
+    "scientific_evidence": [SEMANTIC_RETRIEVAL_MODULE],
     "personalized_physiology": ["pbpk", "neo4j"],
-    "retrieval_only": ["weaviate"],
+    "retrieval_only": [SEMANTIC_RETRIEVAL_MODULE],
 }
 
 INTENT_REQUIRED_INPUTS: Mapping[str, Dict[str, bool]] = {
@@ -461,6 +462,8 @@ def _canonical_intent(value: Any) -> Optional[str]:
 
 
 def _default_ollama_disambiguator(query: str, deterministic_payload: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    if not _clean_text(OLLAMA_MODEL):
+        return None
     if shutil.which("ollama") is None:
         return None
 
@@ -675,7 +678,7 @@ class QueryRouter:
                     if response_style_candidate in {"technical", "layman", "scientific"}:
                         response_style = response_style_candidate
                     routing_reasoning.append(
-                        f"Low-confidence fallback engaged via local Ollama model {OLLAMA_MODEL}."
+                        "Low-confidence fallback engaged via configured local Ollama model."
                     )
                     fallback_reasoning = fallback_payload.get("routing_reasoning", [])
                     if isinstance(fallback_reasoning, list):

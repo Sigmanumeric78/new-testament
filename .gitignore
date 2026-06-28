@@ -4,6 +4,9 @@
 .env
 .env.*
 !.env.example
+.env.mongodb
+.env.pinecone
+.env.ollama
 *.pem
 *.key
 *.crt
@@ -107,7 +110,8 @@ frontend/dist/
 *.md
 !README.md
 !backend/rag/neo4j/neo4j_graph_schema_design.md
-!backend/rag/weaviate/weaviate_schema_design.md
+!tools/legacy_migrations/**/*.md
+!tools/migrations/**/*.md
 
 # Backend generated runtime/data artifacts
 backend/data/interim/

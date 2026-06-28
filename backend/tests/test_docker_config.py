@@ -63,6 +63,8 @@ def test_lambda_dockerfile_sets_tmp_data_root_defaults() -> None:
     assert "DATA_ROOT=/tmp/data" in text
     assert "RESTORE_WORKSPACE_DIR=/tmp/restore" in text
     assert "ARTIFACT_RESTORE_MODE=background" in text
+    assert "ARTIFACT_STORE_BACKEND=mongodb" in text
+    assert "VECTOR_BACKEND=pinecone" in text
     assert "PROJECT_ROOT=/app" in text
     assert "PORT=8000" in text
     assert "CMD [\"uvicorn\", \"backend.api.main:app\"" in text
@@ -74,6 +76,8 @@ def test_dockerfile_has_restore_startup_entrypoint_and_env_defaults() -> None:
     assert "RESTORE_ARTIFACTS_ON_STARTUP=false" in text
     assert "ARTIFACT_RESTORE_MODE=background" in text
     assert "ARTIFACT_RELEASE=v0.6-chemical-explorer" in text
+    assert "ARTIFACT_STORE_BACKEND=mongodb" in text
+    assert "VECTOR_BACKEND=pinecone" in text
     assert "PROJECT_ROOT=/app" in text
     assert "DATA_ROOT=/app/data" in text
 
@@ -128,6 +132,14 @@ def test_compose_has_port_and_host_mapping() -> None:
 def test_requirements_exists() -> None:
     path = BACKEND_ROOT / "requirements.txt"
     assert path.exists()
+
+
+def test_requirements_exclude_legacy_service_sdks() -> None:
+    text = _read(BACKEND_ROOT / "requirements.txt").lower()
+    assert "supabase" not in text
+    assert "weaviate-client" not in text
+    assert "pymongo" in text
+    assert "pinecone" in text
 
 
 def test_required_scripts_exist_and_executable() -> None:

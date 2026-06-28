@@ -247,4 +247,4 @@ def test_cli_compact_output_json() -> None:
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["intent"] == "mechanistic_explanation"
-    assert payload["required_modules"] == ["neo4j", "weaviate"]
+    assert payload["required_modules"] == ["neo4j", "semantic_retrieval"]

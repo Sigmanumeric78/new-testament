@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-REPO_ROOT="$(cd -- "${BACKEND_ROOT}/.." && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
+BACKEND_ROOT="${REPO_ROOT}/backend"
 
 RELEASE="${1:-v0.6-chemical-explorer}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -15,7 +15,7 @@ else
 fi
 
 echo "Exporting Neo4j runtime metadata for release: ${RELEASE}"
-"${PYTHON_BIN}" "${SCRIPT_DIR}/export_neo4j_data.py" --release "${RELEASE}"
+"${PYTHON_BIN}" "${BACKEND_ROOT}/scripts/export_neo4j_data.py" --release "${RELEASE}"
 
 echo "Exporting Weaviate runtime metadata for release: ${RELEASE}"
 "${PYTHON_BIN}" "${SCRIPT_DIR}/export_weaviate_data.py" --release "${RELEASE}"

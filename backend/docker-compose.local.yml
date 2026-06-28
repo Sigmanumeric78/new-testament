@@ -13,9 +13,12 @@ services:
     environment:
       PYTHONPATH: /app/backend
       NEO4J_URI: bolt://host.docker.internal:7687
-      WEAVIATE_URL: http://host.docker.internal:8080
-      WEAVIATE_GRPC_HOST: host.docker.internal
-      WEAVIATE_GRPC_PORT: "50051"
+      ARTIFACT_STORE_BACKEND: mongodb
+      VECTOR_BACKEND: pinecone
+      PINECONE_INDEX: healthlens-knowledge
+      PINECONE_NAMESPACE: production
+      PINECONE_DIMENSION: "768"
+      PINECONE_METRIC: cosine
       OLLAMA_HOST: http://host.docker.internal:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"

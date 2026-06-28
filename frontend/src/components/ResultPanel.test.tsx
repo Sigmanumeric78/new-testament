@@ -6,7 +6,7 @@ import type { AskResponse } from '../lib/types'
 function makeResult(overrides: Partial<AskResponse> = {}): AskResponse {
   return {
     query: 'Can I drive?',
-    answer: 'PBPK and Neo4j and Weaviate with causal path graph vector embedding simulator fallback confidence score',
+    answer: 'PBPK and Neo4j and Semantic retrieval with causal path graph vector embedding simulator fallback confidence score',
     risk_level: 'high',
     risk_summary: 'High impairment risk.',
     estimated_peak_bac: 0.08,
@@ -58,7 +58,7 @@ describe('ResultPanel', () => {
     const banned = [
       'PBPK',
       'Neo4j',
-      'Weaviate',
+      'Semantic retrieval',
       'causal path',
       'graph',
       'vector',
